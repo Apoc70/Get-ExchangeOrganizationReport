@@ -1,5 +1,6 @@
 ﻿<# 
     .SYNOPSIS 
+
     This script fetches Exchange organization configuration data and exports it as Word document.
 
     Thomas Stensitzki 
@@ -7,23 +8,31 @@
     THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE  
     RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER. 
 
-    Version 1.0, 2019-07
+    Version 0.9, 2019-09
 
     Please send ideas, comments and suggestions to support@granikos.eu 
 
     .LINK 
+
     http://scripts.granikos.eu
 
     .DESCRIPTION 
 
+    This script reads Exchange Organization 
+
+    To fetch address list information the accoutn executing this script requires a role
+    group that has the 'Address Lists' role assgined.
+
     The script is based on the ADDS_Inventory-ps1 PowerScript by 
      
     .NOTES 
+    
     Requirements 
-    - Windows Server 2012 R2  
-    - .NET 4.5
+    - Windows Server 2016+, Windows 10
     - Exchange Server Management Shell
-    - Word 2013+
+    - Word 2016+
+    - Role Assignment: Address Lists
+
     
     Revision History 
     -------------------------------------------------------------------------------- 
@@ -1308,6 +1317,7 @@ function Show-ScriptOptions {
     }
   }
 }
+
 Function Write-WordLine
 #Function created by Ryan Revord
 #@rsrevord on Twitter
@@ -1393,6 +1403,18 @@ function Test-ExchangeManagementShellVersion {
   }
 }
 
+function Optimize-String {
+  param (
+    [string]$Value
+  )
+
+  $Value = $Value -replace "`r`n", "`n"
+
+  $Value = $Value -replace "`n", " "
+
+  $Value
+}
+
 #endregion
 
 #region Active Directory Stuff
@@ -1438,13 +1460,11 @@ function Get-ExchangeOrganizationConfig {
   $PublicFolderInformation += @{ Data = "DefaultPublicFolderMovedItemRetention"; Value = $OrgConfig.DefaultPublicFolderMovedItemRetention; }
 
   $SectionTitle = ('Exchange Organization {0}' -f $OrgConfig.Name)
-  $Text = ('Active Directory Forest {1} contains an Exchange Organization with name {0}. The following table shows the orgnaization configuration settings active on {2}.' -f $OrgConfig.Name, $Script:Forest.Name, $GeneratedOn)
+  
+  $Text = ('Active Directory Forest {1} contains an Exchange Organization named {0}. The following table shows the organization configuration settings active on {2}.' -f $OrgConfig.Name, $Script:Forest.Name, $GeneratedOn)
   
   if($ExportTo -eq 'MSWord') {
     
-    $Script:Selection.InsertNewPage()
-
-    Write-WordLine -Style 1 -Tabs 0 -Name $SectionTitle    
     Write-WordLine -Style 0 -Tabs 0 -Name $Text 
     Write-EmptyWordLine
     Write-WordLine -Style 0 -Tabs 0 -Name 'Exchange Organization Configuration' 
@@ -1509,9 +1529,9 @@ function Get-RecipientInformation {
   Show-ProgressBar -Status 'Get Recipient Information - Analyzing Distribution Groups' -PercentComplete 15 -Stage 1
 
   $DistributionGroupCount = ($DistributionGroups | Measure-Object).Count
-  $MailUniversalSecurityGroupCount = ($DistributionGroups | ?{$_.RecipientTypeDetails -eq 'MailUniversalSecurityGroup'}).Count
-  $DynamicDistributionGroupCount = ($DistributionGroups | ?{$_.RecipientTypeDetails -eq 'DynamicDistributionGroup'}).Count
-  $MailUniversalDistributionGroup = ($DistributionGroups | ?{$_.RecipientTypeDetails -eq 'MailUniversalDistributionGroup'}).Count
+  $MailUniversalSecurityGroupCount = ($DistributionGroups | Where-Object{$_.RecipientTypeDetails -eq 'MailUniversalSecurityGroup'}).Count
+  $DynamicDistributionGroupCount = ($DistributionGroups | Where-Object{$_.RecipientTypeDetails -eq 'DynamicDistributionGroup'}).Count
+  $MailUniversalDistributionGroup = ($DistributionGroups | Where-Object{$_.RecipientTypeDetails -eq 'MailUniversalDistributionGroup'}).Count
 
 
   # Recipient Information
@@ -1629,7 +1649,8 @@ function Expand-Object {
     $Value = $Object.$_.ToString()
 
     if($Object.$_.GetType().BaseType.FullName -eq 'Microsoft.Exchange.Data.MultiValuedPropertyBase' `
-    -or $Object.$_.GetType().Name -eq 'ApprovedApplicationCollection') {
+    -or $Object.$_.GetType().Name -eq 'ApprovedApplicationCollection' `
+    -or $Object.$_.GetType().BaseType.FullName -eq 'Microsoft.Exchange.MessagingPolicies.Rules.Tasks.TransportRuleAction[]') {
       $Value = ($Object.$_ -join ', ')
     }
     # elseif ($Object.$_.GetType().BaseType.GenericTypeArguments.Name -eq 'ADObjectId') {
@@ -1792,19 +1813,12 @@ function Get-AdminPermissionInformation {
     
   }
 
-  $SectionTitle = 'Permissions'
   $Text = "The Exchange Organization has $($RoleCount) administrative role groups."
 
   # Write to Word
   if($ExportTo -eq 'MSWord') {
 
-    # Insert page break
-    $Script:Selection.InsertNewPage()
-    
-    Write-WordLine -Style 1 -Tabs 0 -Name $SectionTitle
-    
-    $SectionTitle = 'Admin Roles'
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 3 -Tabs 0 -Name 'Admin Roles' 
     
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -2027,15 +2041,9 @@ Function Get-ComplianceInformation {
 
   $DlpPolicyCount = ($DlpPolicies | Measure-Object).Count
 
-  $SectionTitle = 'Compliance Management'
   $Text = ('The Exchange Organization contains {0} data loss prevention (DLP) policies.' -f ($DlpPolicyCount))
 
   if($ExportTo -eq 'MSWord') {
-
-    # Insert page break
-    $Script:Selection.InsertNewPage()
-    
-    Write-WordLine -Style 1 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 3 -Tabs 0 -Name 'Data Loss Prevention '
 
@@ -2048,7 +2056,7 @@ Function Get-ComplianceInformation {
 
 function Get-RetentionPolicyInformation {
 
-  Show-ProgressBar -Status 'Get Retention Policy Information' -PercentComplete 15 -Stage 1
+  Show-ProgressBar -Status 'Compliance Management - Get Retention Policy Information' -PercentComplete 15 -Stage 1
 
   # Fetch 
   $RetentionPolicies = Get-RetentionPolicy | Sort-Object Id
@@ -2067,7 +2075,7 @@ function Get-RetentionPolicyInformation {
       Name = $Policy.Name;
       Tags = $Tags;
       IsDefault = $Policy.IsDefault;
-      }
+    }
   }
 
   $SectionTitle = 'Retention Policies'
@@ -2104,6 +2112,139 @@ function Get-RetentionPolicyInformation {
   }
 }
 
+function Get-RetentionPolicyTagInformation {
+
+  Show-ProgressBar -Status 'Compliance Management - Get Retention Policy Tags' -PercentComplete 15 -Stage 1
+
+  # Fetch retnetion policy tags
+  $Object = Get-RetentionPolicyTag | Sort-Object Name
+
+  $Count = ($Object | Measure-Object).Count
+
+  # Hash table
+  [System.Collections.Hashtable[]]$ObjectInformation = @()
+
+  # fill hash table
+  foreach($PolicyTag in $Object) { 
+    $ObjectInformation += @{ 
+      Name = $PolicyTag.Name; 
+      Type = $PolicyTag.Type.ToString(); 
+      AgeLimitForRetention = $PolicyTag.AgeLimitForRetention;
+    }
+  }
+
+  $SectionTitle = 'Retention Policy Tags'
+
+  $Text = ('The Exchange Organization contains {0} rention policy tags.' -f $Count)
+
+  # Write to Word
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+
+    if($Count -gt 0) { 
+
+      $Table = Add-WordTable -Hashtable $ObjectInformation `
+      -Columns Name, Tags, AgeLimitForRetention `
+      -Headers 'Name','Type', 'Retention Period' `
+      -AutoFit $wdAutoFitFixed
+
+      Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+      $Table.Columns.Item(1).Width = 180
+      $Table.Columns.Item(2).Width = 150
+      $Table.Columns.Item(3).Width = 80
+
+      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+      Select-WordEndOfDocument
+
+      $Table = $Null
+
+      Write-EmptyWordLine
+
+      # write policy details to Word document
+      if($Count -ne 0) { 
+    
+        Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+
+        foreach ($Policy in $Object) {
+
+          Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
+
+          # store policy details in hash table
+          $ObjectInformation = Expand-Object -Object $Policy
+
+          $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+          # set font to 8pt
+          Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+          Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+          $Table.Columns.Item(1).Width = 180
+          $Table.Columns.Item(2).Width = 300
+          $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+          Select-WordEndOfDocument
+
+          $Table = $Null
+
+          Write-EmptyWordLine 
+        }
+      }
+    }
+  }
+}
+
+function Get-JournalingInformation {
+
+  Show-ProgressBar -Status 'Compliance Management - Get Journaling Rules' -PercentComplete 15 -Stage 1
+
+  # Fetch 
+  $Object = Get-JournalRule | Sort-Object Name 
+
+  $Count = $($Object | Measure-Object).Count
+
+  # Hash table
+  [System.Collections.Hashtable[]]$ObjectInformation = @()
+
+  # fill hash table
+  $ObjectInformation += @{ Data = "Mailboxes"; Value = $SomeCount; }
+
+  $SectionTitle = 'Jornal Rules'
+  $Text = ('The Exchange Organization contains {0} journal rules.' -f $Count)
+
+  # Write to Word
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+
+    $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+    Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 
+
+    $Table.Columns.Item(1).Width = 180
+    $Table.Columns.Item(2).Width = 300
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+  }
+
+
+}
+
 function Get-MobileDeviceInformation {
 
   Show-ProgressBar -Status 'Get Mobile Device Information' -PercentComplete 15 -Stage 1
@@ -2112,11 +2253,11 @@ function Get-MobileDeviceInformation {
   $MobileDevices = Get-MobileDevice -Resultsize Unlimited 
 
   $MobileDeviceCount = ($MobileDevices | Measure-Object).Count
-  $MobileDeviceAvtivatedCount = (($MobileDevices| ?{$_.DeviceAccessState -eq 'Allowed'}) | Measure-Object).Count
-  $MobileDeviceQuarantinedCount = (($MobileDevices| ?{$_.DeviceAccessState -eq 'Quarantined'}) | Measure-Object).Count
-  $MobileDeviceBlockedCount = (($MobileDevices| ?{$_.DeviceAccessState -eq 'Blocked'}) | Measure-Object).Count
-  $MobileDeviceDeviceDiscoveryCount = (($MobileDevices| ?{$_.DeviceAccessState -eq 'DeviceDiscovery'}) | Measure-Object).Count
-  $MobileDeviceUnknownCount = (($MobileDevices| ?{$_.DeviceAccessState -eq 'Unknown'}) | Measure-Object).Count
+  $MobileDeviceAvtivatedCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'Allowed'}) | Measure-Object).Count
+  $MobileDeviceQuarantinedCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'Quarantined'}) | Measure-Object).Count
+  $MobileDeviceBlockedCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'Blocked'}) | Measure-Object).Count
+  $MobileDeviceDeviceDiscoveryCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'DeviceDiscovery'}) | Measure-Object).Count
+  $MobileDeviceUnknownCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'Unknown'}) | Measure-Object).Count
 
   # Hash table
   [System.Collections.Hashtable[]]$ObjectInformation = @()
@@ -2232,10 +2373,10 @@ function Get-MobileDevicePolicies {
 
   $PolicyCount = ($MobileDeviceMailboxPolicies | Measure-Object).Count
 
-  # Hash table for user role assignment overview
+  # Hash table for mobile device policyoverview
   [System.Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # Hash table for user role assignment policy details
+  # Hash table for mobile device policy details
   [System.Collections.Hashtable[]]$ObjectInformation = @()
 
   $CASMailboxes = Get-CASMailbox -ResultSize Unlimited
@@ -2317,11 +2458,416 @@ function Get-MobileDevicePolicies {
       Write-EmptyWordLine 
      
     }
-    
   }
 }
 
+
+function Get-SharingInformation {
+
+  Show-ProgressBar -Status 'Organization Information - Sharing' -PercentComplete 15 -Stage 1
+
+  # Fetch Sharing Policies
+  $Policies = Get-SharingPolicy | Sort-Object Name
+
+  $PolicyCount = ($Policies | Measure-Object).Count
+
+  # Hash table for sharing policy overview
+  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+
+  # process each policy
+  foreach ($Policy in $Policies) {
+  
+    $WordTableRowHash += @{ 
+      PolicyName = $Policy.Name; 
+      Domains = $Policy.Domains;
+      Default = $Policy.Default;
+      Enabled = $Policy.Enabled;
+    }
+  }
+
+  $SectionTitle = 'Sharing Policy'
+
+  $PolicyText = 'policies'
+  if($PolicyCount -eq 1) {$PolicyText = 'policy'}
+  $Text = ('The Exchange Organization contains {0} sharing {1}.' -f $PolicyCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns PolicyName, Domains, Default, Enabled `
+    -Headers 'Policy Name', 'Domains', 'Default', 'Enabled' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+    $Table.Columns.Item(1).Width = 150
+    $Table.Columns.Item(2).Width = 150
+    $Table.Columns.Item(3).Width = 70
+    $Table.Columns.Item(4).Width = 70
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+  }
+}
+
+function Get-AppInformation {
+
+  Show-ProgressBar -Status 'Organization Information - Apps' -PercentComplete 15 -Stage 1
+
+  # Fetch Sharing Policies
+  $Apps = Get-App -OrganizationApp:$true | Sort-Object DisplayName
+
+  $AppCount = ($Apps| Measure-Object).Count
+
+  # Hash table for apps overview
+  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+
+  # process each app
+  foreach ($App in $Apps) {
+  
+    $WordTableRowHash += @{ 
+      DisplayName = $App.DisplayName; 
+      ProviderName = $App.ProviderName;
+      ProvidedTo = $App.ProvidedTo;
+      Enabled = $App.Enabled;
+      DefaultStateForUser = $App.DefaultStateForUser;
+    }
+  }
+
+  $SectionTitle = 'Apps'
+
+  $AppText = 'apps'
+  if($AppCount -eq 1) {$PolicyText = 'app'}
+
+  $Text = ('The Exchange Organization contains {0} {1}.' -f $AppCount, $AppText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns DisplayName, ProviderName, ProvidedTo, Enabled, DefaultStateForUser `
+    -Headers 'Display Name', 'Provider Name', 'Provided To', 'Enabled', 'Default State For User' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+    $Table.Columns.Item(1).Width = 130
+    $Table.Columns.Item(2).Width = 130
+    $Table.Columns.Item(3).Width = 70
+    $Table.Columns.Item(4).Width = 70
+    $Table.Columns.Item(5).Width = 70
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+  }
+}
+
+function Get-AddressListInformation {
+
+  Show-ProgressBar -Status 'Organization Information - Address Lists' -PercentComplete 15 -Stage 1
+
+  # Fetch address lists
+  $AddressLists = Get-AddressList | Sort-Object Name
+
+  $AddressListCount = ($AddressLists| Measure-Object).Count
+
+  # Hash table for address list overview
+  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+
+  # process each address list
+  foreach ($AddressList in $AddressLists) {
+  
+    $WordTableRowHash += @{ 
+      Name = $AddressList.Name; 
+      DisplayName = $AddressList.DisplayName; 
+      RecipientFilter = $AddressList.RecipientFilter; 
+    }
+  }
+
+  $SectionTitle = 'Address Lists'
+
+  $AppText = 'address lists'
+  if($AddressListCount-eq 1) {$PolicyText = 'address list'}
+
+  $Text = ('The Exchange Organization contains {0} {1}.' -f $AddressListCount, $AppText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, DisplayName, RecipientFilter `
+    -Headers 'Name', 'Display Name', 'Recipient Filter' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+    $Table.Columns.Item(1).Width = 130
+    $Table.Columns.Item(2).Width = 130
+    $Table.Columns.Item(3).Width = 180
+    
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    Write-WordLine -Style 4 -Tabs 0 -Name 'Address List Details'
+    
+    foreach ($AddressList in $AddressLists) {
+
+      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $AddressList.Name)
+
+      # store policy details in hash table
+      $ObjectInformation = Expand-Object -Object $AddressList
+
+      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+      # set font to 8pt
+      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+      $Table.Columns.Item(1).Width = 180
+      $Table.Columns.Item(2).Width = 300
+      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+      Select-WordEndOfDocument
+
+      $Table = $Null
+
+      Write-EmptyWordLine 
+     
+    }
+  }
+}
+
+function Get-MalwareInformation {
+
+  Show-ProgressBar -Status 'Protection - Malware' -PercentComplete 15 -Stage 1
+
+  # Fetch malware policies
+  $MalwarePolicies = Get-MalwareFilterPolicy | Sort-Object Name
+
+  $MalwarePolicyCount = ($MalwarePolicies| Measure-Object).Count
+
+  # Hash table for malware policy overview
+  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+
+  # process each malware policy
+  foreach ($Policy in $MalwarePolicies) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Policy.Name; 
+      Action = $Policy.Action; 
+      CustomNotifications = $Policy.CustomNotifications; 
+      IsDefault = $Policy.IsDefault; 
+    }
+  }
+
+  $SectionTitle = 'Malware Policy'
+
+  $PolicyText = 'malware policies'
+  if($MalwarePolicyCount-eq 1) {$PolicyText = 'malware policy'}
+
+  $Text = ('The Exchange Organization contains {0} {1}.' -f $MalwarePolicyCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, Action, CustomNotifications, IsDefault `
+    -Headers 'Name', 'Action', 'Custom Notifications', 'IsDefault' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+    $Table.Columns.Item(1).Width = 130
+    $Table.Columns.Item(2).Width = 130
+    $Table.Columns.Item(3).Width = 80
+    $Table.Columns.Item(4).Width = 80
+    
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    Write-WordLine -Style 4 -Tabs 0 -Name 'Malware Policy Details'
+
+    foreach ($Policy in $MalwarePolicies) {
+
+      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
+
+      # store policy details in hash table
+      $ObjectInformation = Expand-Object -Object $Policy
+
+      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+      # set font to 8pt
+      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+      $Table.Columns.Item(1).Width = 180
+      $Table.Columns.Item(2).Width = 300
+      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+      Select-WordEndOfDocument
+
+      $Table = $Null
+
+      Write-EmptyWordLine 
+     
+    }
+  }
+}
+
+function Get-TransportRuleInformation {
+
+  Show-ProgressBar -Status 'Mail Flow - Transport Rules' -PercentComplete 15 -Stage 1
+
+  # Fetch malware policies
+  $TransportRules = Get-TransportRule | Sort-Object Priority
+
+  $TransportRuleCount = ($TransportRules| Measure-Object).Count
+
+  # Hash table for malware policy overview
+  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+
+  # process each malware policy
+  foreach ($Rule in $TransportRules) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Rule.Name; 
+      Priority = $Rule.Priority; 
+      State = $Rule.State; 
+      Mode = $Rule.Mode; 
+      Comments = (Optimize-String -Value $Rule.Comments); 
+    }
+  }
+
+  $SectionTitle = 'Transport Rules'
+
+  $PolicyText = 'rules'
+  if($TransportRuleCount-eq 1) {$PolicyText = 'rule'}
+
+  $Text = ('The Exchange Organization contains {0} transport {1}.' -f $TransportRuleCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, Priority, State, Mode, Comments `
+    -Headers 'Name', 'Priority', 'State', 'Mode', 'Comments' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+
+    $Table.Columns.Item(1).Width = 140
+    $Table.Columns.Item(2).Width = 50
+    $Table.Columns.Item(3).Width = 50
+    $Table.Columns.Item(4).Width = 50
+    $Table.Columns.Item(5).Width = 140
+    
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    Write-WordLine -Style 4 -Tabs 0 -Name 'Transport Rule Details'
+
+    foreach ($Rule in $TransportRules) {
+
+      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Rule.Name)
+
+      # store policy details in hash table
+      $ObjectInformation = Expand-Object -Object $Rule
+
+      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+      # set font to 8pt
+      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+      $Table.Columns.Item(1).Width = 180
+      $Table.Columns.Item(2).Width = 300
+      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+      Select-WordEndOfDocument
+
+      $Table = $Null
+
+      Write-EmptyWordLine 
+     
+    }
+  }
+}
+
+function Set-SectionTitle {
+  param (
+    [string]$SectionTitle = '',
+    [int]$Style = 3,
+    [switch]$NewPage
+  )
+
+  if($NewPage) {
+    # Insert page break
+    $Script:Selection.InsertNewPage()
+  }
+
+  Write-WordLine -Style $Style -Tabs 0 -Name $SectionTitle
+
+}
+
 function Get-WordDocumentationLinks {
+
+  # todo add proper hyperlinks as table cell information to Word
 
   # Hash table for documentation links
   [System.Collections.Hashtable[]]$HashTableDocumentationLinks = @()
@@ -2360,58 +2906,10 @@ function Get-WordDocumentationLinks {
 
     Write-EmptyWordLine
   }
-
 }
 
 #endregion
 
-#region Template
-
-function Get-ObjectTemplate {
-
-  Show-ProgressBar -Status 'Get Object Information - Some Information' -PercentComplete 15 -Stage 1
-
-  # Fetch 
-  $Object = Get-Mailbox -Resultsize Unlimited 
-
-  $SomeCount = 0
-
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
-
-  # fill hash table
-  $ObjectInformation += @{ Data = "Mailboxes"; Value = $SomeCount; }
-
-  $SectionTitle = 'Section Title'
-
-  $Text = ''
-
-  # Write to Word
-  if($ExportTo -eq 'MSWord') {
-
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
-
-    Write-WordLine -Style 0 -Tabs 0 -Name $Text
-
-    Write-EmptyWordLine
-
-    $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
-
-    Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 
-
-    $Table.Columns.Item(1).Width = 180
-    $Table.Columns.Item(2).Width = 300
-    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
-
-    Select-WordEndOfDocument
-
-    $Table = $Null
-
-    Write-EmptyWordLine
-  }
-}
-
-#endregion
 
 #region ideas
 
@@ -2589,6 +3087,9 @@ switch ($ExportTo) {
     Get-ActiveDirectoryInformation
 
     # Let's work on Exchange Org information
+
+    Set-SectionTitle -Style 1 -SectionTitle 'Exchange Organization Overview' -NewPage
+
     Get-ExchangeOrganizationConfig
 
     Get-RecipientInformation
@@ -2598,6 +3099,9 @@ switch ($ExportTo) {
     Get-TransportConfigInformation
 
     # Permissions
+
+    Set-SectionTitle -Style 1 -SectionTitle 'Permissions' -NewPage
+
     Get-AdminPermissionInformation
 
     Get-UserRoleAssignmentPolicies
@@ -2606,27 +3110,40 @@ switch ($ExportTo) {
 
     # Compliance Management
 
+    Set-SectionTitle -Style 1 -SectionTitle 'Compliance Management' -NewPage
+
     Get-ComplianceInformation
 
     Get-RetentionPolicyInformation
 
-    ## Retention Policies
-    ## Retention Policy Tags
-    ## Journaling Rules
+    Get-RetentionPolicyTagInformation
+
+    Get-JournalingInformation
 
     # Organization
 
-    ## Sharing
-    ## Add-Ins
-    ## Address Lists
+    Set-SectionTitle -Style 1 -SectionTitle 'Organization' -NewPage
+
+    Get-SharingInformation
+
+    Get-AppInformation
+
+    Get-AddressListInformation
 
     # Protection
 
-    ## Malware Filter
+    Set-SectionTitle -Style 1 -SectionTitle 'Protection' -NewPage
+
+    Get-MalwareInformation
+    
+    ## Malware Rules 
 
     # Mail Flow
 
-    ## Rules
+    Set-SectionTitle -Style 1 -SectionTitle 'Mail Flow' -NewPage
+
+    Get-TransportRuleInformation
+    
     ## Accepted Domains (already covered)his step)
     ## Email address policies
     ## Receive Connectors
