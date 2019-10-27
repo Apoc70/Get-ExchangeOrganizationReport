@@ -8,7 +8,7 @@
     THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE  
     RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER. 
 
-    Version 0.9, 2019-09
+    Version 0.9, 2019-10
 
     Please send ideas, comments and suggestions to support@granikos.eu 
 
@@ -54,22 +54,24 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$CompanyName = 'ACME',
+  [string]$CompanyName = 'ACME Inc.',
   [ValidateSet('MSWord','Html')]
   $ExportTo = 'MSWord',
   [string]$CoverPage = 'Sideline',
-  [string]$CompanyAddress = '',
+  [string]$CompanyAddress = 'ACME Street, ACME City, 55555',
   [string]$CompanyEmail = 'email@mcsmemail.de',
   [string]$CompanyFax = '+XX FAX',
   [string]$CompanyPhone = '+XX PHONE',
   [switch]$ViewEntireForest,
   [string]$ADForest = $Env:USERDNSDOMAIN,
   [string]$ADDomain = '',
+  [switch]$IncludeDetails,
+  [switch]$IncludePublicFolders,
+  [switch]$IncludeIntroduction,
   [switch]$SendMail,
   [string]$MailFrom = '',
   [string]$MailTo = '',
-  [string]$MailServer = '',
-  [switch]$ShowScriptOptions
+  [string]$MailServer = ''
 )
 
 # Some variables to declare
@@ -85,15 +87,104 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Default values
 $NA = 'N/A'
+$NotExported = 'Not yetexported to Word'
 $GeneratedOn = (Get-Date -f yyyy-MM-dd)
+$ReportCulture = "de-DE"
+
+#region Type Definition
+
+try {
+
+  Add-Type -TypeDefinition @"
+
+  using System.Collections;
+
+  namespace OrgReport {
+    
+    public class ExchangeServerObject {
+      public string Name;
+      public OperatingSystemObject OperatingSystem;
+    }
+
+    public class OperatingSystemObject {
+      public OSVersionName  OSVersion; 
+      public string OSVersionBuild; 
+      public string OSName;
+      public object OperatingSystem;
+      public string BootUpTimeInDays;
+      public string BootUpTimeInHours;
+      public string BootUpTimeInMinutes;
+      public string BootUpTimeInSeconds;
+      public string TimeZone;
+      public bool PendingReboot;
+      public System.Array TLSSettings;
+    }
+
+    //enum for OSVersion
+    public enum OSVersionName {
+      Unknown,
+      Windows2008, 
+      Windows2008R2,
+      Windows2012,
+      Windows2012R2,
+      Windows2016,
+      Windows2019
+    }
+
+    public enum ExchangeCULevel {
+      Unknown,
+      Preview,
+      RTM,
+      CU1,
+      CU2,
+      CU3,
+      CU4,
+      CU5,
+      CU6,
+      CU7,
+      CU8,
+      CU9,
+      CU10,
+      CU11,
+      CU12,
+      CU13,
+      CU14,
+      CU15,
+      CU16,
+      CU17,
+      CU18,
+      CU19,
+      CU20,
+      CU21,
+      CU22,
+      CU23
+    }
+  }
+
+"@
+}
+catch {
+  # oops 
+  Write-Warning -Message 'The script was unable to add custom classes to this PowerShell session. Please close this PowerShell session and open a new session.'
+  exit 
+}
+finally {
+  # restore saved preferred error action
+    $ErrorActionPreference = $SavedErrerActionPreference
+}
+
+#end region
 
 function Stop-Script {
+
   if($ExportTo -eq 'MSWord') {
     # Cleanup ComObject
     $Script:Word.Quit()
     Write-Verbose "$(Get-Date): System Cleanup"
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Script:Word) | Out-Null
-    If(Test-Path variable:global:word) {
+
+    [Runtime.Interopservices.Marshal]::ReleaseComObject($Script:Word) | Out-Null
+
+    if(Test-Path variable:global:word) {
       Remove-Variable -Name Word -Scope Global -Force -Confirm:$false
     }
   }
@@ -103,6 +194,132 @@ function Stop-Script {
   Write-Verbose "$(Get-Date): Script has been aborted"
   $ErrorActionPreference = $SavedErrerActionPreference
   Exit
+}
+
+function Show-ProgressBar {
+  [CmdletBinding()]
+  param(
+    [int]$PercentComplete,
+    [string]$Status = '',
+    [int]$Stage,
+    [string]$Activity = 'Get-ExchangeOrganizationReport'
+  )
+
+  $TotalStages = 5
+  Write-Progress -Id 1 -Activity $Activity -Status $Status -PercentComplete (($PercentComplete/$TotalStages)+(1/$TotalStages*$Stage*100))
+}
+
+#region registry functions
+#http://stackoverflow.com/questions/5648931/test-if-registry-value-exists
+# This Function just gets $True or $False
+Function Test-RegistryValue {
+  param(
+    [string]$Path, 
+    [string]$Name
+  )
+  $key = Get-Item -LiteralPath $Path -EA 0
+  $key -and $Null -ne $key.GetValue($Name, $Null)
+}
+
+# Gets the specified local registry value or $Null if it is missing
+Function Get-LocalRegistryValue {
+  param (
+    [string]$Path, 
+    [string]$Name
+  )
+  $key = Get-Item -LiteralPath $Path -ea 0
+  if($key) {
+    $key.GetValue($Name, $Null)
+  }
+  else {
+    $Null
+  }
+}
+
+function Test-CompanyName {
+  $RegistryPath = 'HKCU:\Software\Microsoft\Office\Common\UserInfo'
+  [bool]$Result = Test-RegistryValue -Path $RegistryPath -Name 'CompanyName'
+
+  if($Result) {
+    Return Get-LocalRegistryValue -Path $RegistryPath -Name "CompanyName"
+  }
+  else {
+    $Result = Test-RegistryValue -Path $RegistryPath -Name "Company"
+		
+    if($Result) {
+      Return Get-LocalRegistryValue -Path $RegistryPath -Name "Company"
+    }
+    else {
+      Return ''
+    }
+  }
+}
+Function Get-RegistryValue {	
+  [CmdletBinding()]
+  Param(
+    [string]$Path, 
+    [string]$Name, 
+    [string]$ComputerName
+  )
+  # Gets the specified registry value or $Null if it is missing
+
+  if($ComputerName -eq $env:COMPUTERNAME -or $ComputerName -eq "LocalHost")	{
+    $key = Get-Item -LiteralPath $path -ea 0
+    if($key) {
+      Return $key.GetValue($Name, $Null)
+    }
+    else {
+      Return $Null
+    }
+  }
+  else {
+    #path needed here is different for remote registry access
+    $path1 = $Path.SubString(6)
+    $path2 = $Path1.Replace('\','\\')
+    $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $ComputerName)
+    $RegKey= $Reg.OpenSubKey($path2)
+    $Results = $RegKey.GetValue($Name)
+
+    if($Null -ne $Results) {
+      Return $Results
+    }
+    else {
+      Return $Null
+    }
+  }
+}
+
+#endregion 
+
+#region Word functions
+
+function Test-WordPrerequisites {
+
+  if(!(Test-Path -Path REGISTRY::HKEY_CLASSES_ROOT\Word.Application)) {
+
+    # Word is not installed
+    $ErrorActionPreference = $SavedErrerActionPreference
+		Write-Warning -Message 'This script uses Microsoft Word, please install Microsoft Word or run the script on a computer with Microsoft Word installed.'
+
+    # exit script
+		Exit
+  }
+  else {
+    # get current session id
+    $SessionID = (Get-Process -PID $PID).SessionId
+    
+    [bool]$IsRunning = ($null -ne ((Get-Process -Name 'WinWord' -ErrorAction SilentlyContinue) | Where-Object {$_.SessionId -eq $SessionID})	)
+
+	  if($IsRunning) {
+
+      # There is an active Word instance
+		  $ErrorActionPreference = $SavedErrerActionPreference
+		  Write-Warning -Message "Please close all running instances of Microsoft Word and restart the PowerShell script"
+
+      # exit script
+		  Exit
+	  }
+  }
 }
 
 function Set-WordHashTable {
@@ -161,103 +378,68 @@ function Set-WordHashTable {
 
 }
 
-function Show-ProgressBar {
-  [CmdletBinding()]
-  param(
-    [int]$PercentComplete,
-    [string]$Status = '',
-    [int]$Stage,
-    [string]$Activity = 'Get-ExchangeOrganizationReport'
-  )
-
-  $TotalStages = 5
-  Write-Progress -Id 1 -Activity $Activity -Status $Status -PercentComplete (($PercentComplete/$TotalStages)+(1/$TotalStages*$Stage*100))
-}
-
-#region registry functions
-#http://stackoverflow.com/questions/5648931/test-if-registry-value-exists
-# This Function just gets $True or $False
-Function Test-RegistryValue {
-  param(
-    [string]$Path, 
-    [string]$Name
-  )
-  $key = Get-Item -LiteralPath $Path -EA 0
-  $key -and $Null -ne $key.GetValue($Name, $Null)
-}
-
-# Gets the specified local registry value or $Null if it is missing
-Function Get-LocalRegistryValue {
-  param (
-    [string]$Path, 
-    [string]$Name
-  )
-  $key = Get-Item -LiteralPath $Path -ea 0
-  If($key) {
-    $key.GetValue($Name, $Null)
-  }
-  Else {
-    $Null
-  }
-}
-
-function Test-CompanyName {
-  $RegistryPath = 'HKCU:\Software\Microsoft\Office\Common\UserInfo'
-  [bool]$Result = Test-RegistryValue -Path $RegistryPath -Name 'CompanyName'
-
-  If($Result) {
-    Return Get-LocalRegistryValue -Path $RegistryPath -Name "CompanyName"
-  }
-  Else {
-    $Result = Test-RegistryValue -Path $RegistryPath -Name "Company"
-		
-    If($Result) {
-      Return Get-LocalRegistryValue -Path $RegistryPath -Name "Company"
-    }
-    Else {
-      Return ''
-    }
-  }
-}
-Function Get-RegistryValue {	
-  [CmdletBinding()]
+Function Write-WordLine
+#Function created by Ryan Revord
+#@rsrevord on Twitter
+#Function created to make output to Word easy in this script
+#updated 27-Mar-2014 to include font name, font size, italics and bold options
+{
   Param(
-    [string]$Path, 
-    [string]$Name, 
-    [string]$ComputerName
-  )
-  # Gets the specified registry value or $Null if it is missing
-
-  If($ComputerName -eq $env:COMPUTERNAME -or $ComputerName -eq "LocalHost")	{
-    $key = Get-Item -LiteralPath $path -ea 0
-    If($key) {
-      Return $key.GetValue($Name, $Null)
-    }
-    Else {
-      Return $Null
-    }
+    [int]$Style=0, 
+    [int]$Tabs = 0, 
+    [string]$Name = '', 
+    [string]$Value = '', 
+    [string]$FontName=$Null,
+    [int]$FontSize=0,
+    [bool]$Italics=$False,
+    [bool]$Boldface=$False,
+  [Switch]$NoNewLine)
+	
+  #Build output style
+  [string]$output = ""
+  Switch ($style) {
+    0 {$Script:Selection.Style = $Script:MyHash.Word_NoSpacing; Break}
+    1 {$Script:Selection.Style = $Script:MyHash.Word_Heading1; Break}
+    2 {$Script:Selection.Style = $Script:MyHash.Word_Heading2; Break}
+    3 {$Script:Selection.Style = $Script:MyHash.Word_Heading3; Break}
+    4 {$Script:Selection.Style = $Script:MyHash.Word_Heading4; Break}
+    Default {$Script:Selection.Style = $Script:MyHash.Word_NoSpacing; Break}
   }
-  Else {
-    #path needed here is different for remote registry access
-    $path1 = $Path.SubString(6)
-    $path2 = $Path1.Replace('\','\\')
-    $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $ComputerName)
-    $RegKey= $Reg.OpenSubKey($path2)
-    $Results = $RegKey.GetValue($Name)
-
-    If($Null -ne $Results) {
-      Return $Results
-    }
-    Else {
-      Return $Null
-    }
+	
+  #build # of tabs
+  While($tabs -gt 0) 	{ 
+    $output += "`t"
+    $tabs--
   }
+ 
+  if(![String]::IsNullOrEmpty($fontName)) {
+    $Script:Selection.Font.name = $fontName
+  } 
+
+  if($fontSize -ne 0) 	{
+    $Script:Selection.Font.size = $fontSize
+  } 
+ 
+  if($italics -eq $True) {
+    $Script:Selection.Font.Italic = $True
+  } 
+ 
+  if($boldface -eq $True) {
+    $Script:Selection.Font.Bold = $True
+  } 
+
+  #output the rest of the parameters.
+  $output += $name + $value
+  $Script:Selection.TypeText($output)
+ 
+  #test for new WriteWordLine 0.
+  if(!($nonewline)) {
+    $Script:Selection.TypeParagraph()
+  } 
 }
 
-#endregion 
-
-#region Word functions
 function Test-WordCoverPage {
+  [CmdletBinding()]
   Param(
     [int]$WordVersion, 
     [string]$CoverPage, 
@@ -268,19 +450,19 @@ function Test-WordCoverPage {
 	
   Switch ($CultureCode)	{
     'ca-'	{
-      If($WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "En bandes", "Faceta", "Filigrana",
           "Integral", "Ió (clar)", "Ió (fosc)", "Línia lateral",
           "Moviment", "Quadrícula", "Retrospectiu", "Sector (clar)",
         "Sector (fosc)", "Semàfor", "Visualització principal", "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2013) {
+      elseif($WordVersion -eq $wdWord2013) {
         $CoverPageArray = ("Austin", "En bandes", "Faceta", "Filigrana",
           "Integral", "Ió (clar)", "Ió (fosc)", "Línia lateral",
           "Moviment", "Quadrícula", "Retrospectiu", "Sector (clar)",
         "Sector (fosc)", "Semàfor", "Visualització", "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alfabet", "Anual", "Austin", "Conservador",
           "Contrast", "Cubicles", "Diplomàtic", "Exposició",
           "Línia lateral", "Mod", "Mosiac", "Moviment", "Paper de diari",
@@ -290,20 +472,20 @@ function Test-WordCoverPage {
     }
 
     'da-'	{
-      If($WordVersion -eq $wdWord2016) {
-        $CoverPageArray = ("Austin", "BevægElse", "Brusen", "Facet", "Filigran", 
+      if($WordVersion -eq $wdWord2016) {
+        $CoverPageArray = ("Austin", "Bevægelse", "Brusen", "Facet", "Filigran", 
           "Gitter", "Integral", "Ion (lys)", "Ion (mørk)", 
           "Retro", "Semafor", "Sidelinje", "Stribet", 
         "Udsnit (lys)", "Udsnit (mørk)", "Visningsmaster")
       }
-      ElseIf($WordVersion -eq $wdWord2013) {
-        $CoverPageArray = ("BevægElse", "Brusen", "Ion (lys)", "Filigran",
+      elseif($WordVersion -eq $wdWord2013) {
+        $CoverPageArray = ("Bevægelse", "Brusen", "Ion (lys)", "Filigran",
           "Retro", "Semafor", "Visningsmaster", "Integral",
           "Facet", "Gitter", "Stribet", "Sidelinje", "Udsnit (lys)",
         "Udsnit (mørk)", "Ion (mørk)", "Austin")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
-        $CoverPageArray = ("BevægElse", "Moderat", "Perspektiv", "Firkanter",
+      elseif($WordVersion -eq $wdWord2010) {
+        $CoverPageArray = ("Bevægelse", "Moderat", "Perspektiv", "Firkanter",
           "Overskrid", "Alfabet", "Kontrast", "Stakke", "Fliser", "Gåde",
           "Gitter", "Austin", "Eksponering", "Sidelinje", "Enkel",
         "Nålestribet", "Årlig", "Avispapir", "Tradionel")
@@ -311,20 +493,20 @@ function Test-WordCoverPage {
     }
 
     'de-'	{
-      If($WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "Bewegung", "Facette", "Filigran", 
           "Gebändert", "Integral", "Ion (dunkel)", "Ion (hell)", 
           "Pfiff", "Randlinie", "Raster", "Rückblick", 
           "Segment (dunkel)", "Segment (hell)", "Semaphor", 
         "ViewMaster")
       }
-      ElseIf($WordVersion -eq $wdWord2013) {
+      elseif($WordVersion -eq $wdWord2013) {
         $CoverPageArray = ("Semaphor", "Segment (hell)", "Ion (hell)",
           "Raster", "Ion (dunkel)", "Filigran", "Rückblick", "Pfiff",
           "ViewMaster", "Segment (dunkel)", "Verbunden", "Bewegung",
         "Randlinie", "Austin", "Integral", "Facette")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alphabet", "Austin", "Bewegung", "Durchscheinend",
           "Herausgestellt", "Jährlich", "Kacheln", "Kontrast", "Kubistisch",
           "Modern", "Nadelstreifen", "Perspektive", "Puzzle", "Randlinie",
@@ -333,13 +515,13 @@ function Test-WordCoverPage {
     }
 
     'en-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "Banded", "Facet", "Filigree", "Grid",
           "Integral", "Ion (Dark)", "Ion (Light)", "Motion", "Retrospect",
           "Semaphore", "Sideline", "Slice (Dark)", "Slice (Light)", "ViewMaster",
         "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alphabet", "Annual", "Austere", "Austin", "Conservative",
           "Contrast", "Cubicles", "Exposure", "Grid", "Mod", "Motion", "Newsprint",
         "Perspective", "Pinstripes", "Puzzle", "Sideline", "Stacks", "Tiles", "Transcend")
@@ -347,19 +529,19 @@ function Test-WordCoverPage {
     }
 
     'es-'	{
-      If($WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "Con bandas", "Cortar (oscuro)", "Cuadrícula", 
           "Whisp", "Faceta", "Filigrana", "Integral", "Ion (claro)", 
           "Ion (oscuro)", "Línea lateral", "Movimiento", "Retrospectiva", 
         "Semáforo", "Slice (luz)", "Vista principal", "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2013) {
+      elseif($WordVersion -eq $wdWord2013) {
         $CoverPageArray = ("Whisp", "Vista principal", "Filigrana", "Austin",
           "Slice (luz)", "Faceta", "Semáforo", "Retrospectiva", "Cuadrícula",
           "Movimiento", "Cortar (oscuro)", "Línea lateral", "Ion (oscuro)",
         "Ion (claro)", "Integral", "Con bandas")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alfabeto", "Anual", "Austero", "Austin", "Conservador",
           "Contraste", "Cuadrícula", "Cubículos", "Exposición", "Línea lateral",
           "Moderno", "Mosaicos", "Movimiento", "Papel periódico",
@@ -368,19 +550,19 @@ function Test-WordCoverPage {
     }
 
     'fi-'	{
-      If($WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Filigraani", "Integraali", "Ioni (tumma)",
           "Ioni (vaalea)", "Opastin", "Pinta", "Retro", "Sektori (tumma)",
           "Sektori (vaalea)", "Vaihtuvavärinen", "ViewMaster", "Austin",
         "Kuiskaus", "Liike", "Ruudukko", "Sivussa")
       }
-      ElseIf($WordVersion -eq $wdWord2013) {
+      elseif($WordVersion -eq $wdWord2013) {
         $CoverPageArray = ("Filigraani", "Integraali", "Ioni (tumma)",
           "Ioni (vaalea)", "Opastin", "Pinta", "Retro", "Sektori (tumma)",
           "Sektori (vaalea)", "Vaihtuvavärinen", "ViewMaster", "Austin",
         "Kiehkura", "Liike", "Ruudukko", "Sivussa")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Aakkoset", "Askeettinen", "Austin", "Kontrasti",
           "Laatikot", "Liike", "Liituraita", "Mod", "Osittain peitossa",
           "Palapeli", "Perinteinen", "Perspektiivi", "Pinot", "Ruudukko",
@@ -389,13 +571,13 @@ function Test-WordCoverPage {
     }
 
     'fr-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("À bandes", "Austin", "Facette", "Filigrane", 
           "Guide", "Intégrale", "Ion (clair)", "Ion (foncé)", 
           "Lignes latérales", "Quadrillage", "Rétrospective", "Secteur (clair)", 
         "Secteur (foncé)", "Sémaphore", "ViewMaster", "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alphabet", "Annuel", "Austère", "Austin", 
           "Blocs empilés", "Classique", "Contraste", "Emplacements de bureau", 
           "Exposition", "Guide", "Ligne latérale", "Moderne", 
@@ -405,28 +587,28 @@ function Test-WordCoverPage {
     }
 
     'nb-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
-        $CoverPageArray = ("Austin", "BevegElse", "Dempet", "Fasett", "Filigran",
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+        $CoverPageArray = ("Austin", "Bevegelse", "Dempet", "Fasett", "Filigran",
           "Integral", "Ion (lys)", "Ion (mørk)", "Retrospekt", "Rutenett",
           "Sektor (lys)", "Sektor (mørk)", "Semafor", "Sidelinje", "Stripet",
         "ViewMaster")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alfabet", "Årlig", "Avistrykk", "Austin", "Avlukker",
-          "BevegElse", "Engasjement", "Enkel", "Fliser", "Konservativ",
+          "Bevegelse", "Engasjement", "Enkel", "Fliser", "Konservativ",
           "Kontrast", "Mod", "Perspektiv", "Puslespill", "Rutenett", "Sidelinje",
         "Smale striper", "Stabler", "Transcenderende")
       }
     }
 
     'nl-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "Beweging", "Facet", "Filigraan", "Gestreept",
           "Integraal", "Ion (donker)", "Ion (licht)", "Raster",
           "Segment (Light)", "Semafoor", "Slice (donker)", "Spriet",
         "Terugblik", "Terzijde", "ViewMaster")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Aantrekkelijk", "Alfabet", "Austin", "Bescheiden",
           "Beweging", "Blikvanger", "Contrast", "Eenvoudig", "Jaarlijks",
           "Krantenpapier", "Krijtstreep", "Kubussen", "Mod", "Perspectief",
@@ -436,13 +618,13 @@ function Test-WordCoverPage {
     }
 
     'pt-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Animação", "Austin", "Em Tiras", "Exibição Mestra",
           "Faceta", "Fatia (Clara)", "Fatia (Escura)", "Filete", "Filigrana", 
           "Grade", "Integral", "Íon (Claro)", "Íon (Escuro)", "Linha Lateral",
         "Retrospectiva", "Semáforo")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alfabeto", "Animação", "Anual", "Austero", "Austin", "Baias",
           "Conservador", "Contraste", "Exposição", "Grade", "Ladrilhos",
           "Linha Lateral", "Listras", "Mod", "Papel Jornal", "Perspectiva", "Pilhas",
@@ -451,21 +633,21 @@ function Test-WordCoverPage {
     }
 
     'sv-'	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016) {
         $CoverPageArray = ("Austin", "Band", "Fasett", "Filigran", "Integrerad", "Jon (ljust)",
-          "Jon (mörkt)", "Knippe", "Rutnät", "RörElse", "Sektor (ljus)", "Sektor (mörk)",
+          "Jon (mörkt)", "Knippe", "Rutnät", "Rörelse", "Sektor (ljus)", "Sektor (mörk)",
         "Semafor", "Sidlinje", "VisaHuvudsida", "Återblick")
       }
-      ElseIf($WordVersion -eq $wdWord2010) {
+      elseif($WordVersion -eq $wdWord2010) {
         $CoverPageArray = ("Alfabetmönster", "Austin", "Enkelt", "Exponering", "Konservativt",
           "Kontrast", "Kritstreck", "Kuber", "Perspektiv", "Plattor", "Pussel", "Rutnät",
-          "RörElse", "Sidlinje", "Sobert", "Staplat", "Tidningspapper", "Årligt",
+          "Rörelse", "Sidlinje", "Sobert", "Staplat", "Tidningspapper", "Årligt",
         "Övergående")
       }
     }
 
     'zh-'	{
-      If($WordVersion -eq $wdWord2010 -or $WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016)
+      if($WordVersion -eq $wdWord2010 -or $WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016)
       {
         $CoverPageArray = ('奥斯汀', '边线型', '花丝', '怀旧', '积分',
           '离子(浅色)', '离子(深色)', '母版型', '平面', '切片(浅色)',
@@ -475,14 +657,14 @@ function Test-WordCoverPage {
     }
 
     Default	{
-      If($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016)
+      if($WordVersion -eq $wdWord2013 -or $WordVersion -eq $wdWord2016)
       {
         $CoverPageArray = ("Austin", "Banded", "Facet", "Filigree", "Grid",
           "Integral", "Ion (Dark)", "Ion (Light)", "Motion", "Retrospect",
           "Semaphore", "Sideline", "Slice (Dark)", "Slice (Light)", "ViewMaster",
         "Whisp")
       }
-      ElseIf($WordVersion -eq $wdWord2010)
+      elseif($WordVersion -eq $wdWord2010)
       {
         $CoverPageArray = ("Alphabet", "Annual", "Austere", "Austin", "Conservative",
           "Contrast", "Cubicles", "Exposure", "Grid", "Mod", "Motion", "Newsprint",
@@ -491,12 +673,12 @@ function Test-WordCoverPage {
     }
   }
 	
-  If($CoverPageArray -contains $CoverPage)
+  if($CoverPageArray -contains $CoverPage)
   {
     $CoverPageArray = $Null
     Return $True
   }
-  Else
+  else
   {
     $CoverPageArray = $Null
     Return $False
@@ -556,19 +738,49 @@ Function Get-WordCultureCode {
   Return $CultureCode
 }
 
+function Set-SectionTitle {
+  param (
+    [string]$SectionTitle = '',
+    [int]$Style = 3,
+    [switch]$NewPage
+  )
+
+  if($NewPage) {
+    # Insert page break
+    $Script:Selection.InsertNewPage()
+  }
+
+  Write-WordLine -Style $Style -Tabs 0 -Name $SectionTitle
+
+}
+
+function Get-CompanyName {
+	[bool]$xResult = Test-RegistryValue "HKCU:\Software\Microsoft\Office\Common\UserInfo" "CompanyName"
+	if($xResult) {
+		Return Get-LocalRegistryValue "HKCU:\Software\Microsoft\Office\Common\UserInfo" "CompanyName"
+	}
+	else {
+		$xResult = Test-RegistryValue "HKCU:\Software\Microsoft\Office\Common\UserInfo" "Company"
+		if($xResult) {
+			Return Get-LocalRegistryValue "HKCU:\Software\Microsoft\Office\Common\UserInfo" "Company"
+		}
+		else {
+			Return ""
+		}
+	}
+}
+
 function Close-WordDocument {
   
   # Reset Grammar and Spelling options back to their original settings befor closing Word
   $Script:Word.Options.CheckGrammarAsYouType = $Script:CurrentGrammarOption
   $Script:Word.Options.CheckSpellingAsYouType = $Script:CurrentSpellingOption
 
-  Write-Verbose -Message "$(Get-Date): Save and close document, and shutdown Word instance"
-
   # Pepare file name
   $Script:FileName = ('{0}-{1}.docx' -f $FileName, (Get-Date -f yyyy-MM-dd))
   $Script:FileNameWord = "$($Script:FileName)"
 
-  If($Script:WordVersion -eq $wdWord2010) {
+  if($Script:WordVersion -eq $wdWord2010) {
     
     # Set default document type
     $SaveFormat = [Enum]::Parse([Microsoft.Office.Interop.Word.WdSaveFormat], "wdFormatDocumentDefault")
@@ -589,8 +801,8 @@ function Close-WordDocument {
   $Script:Word.Quit()
 
   # Finally, cleanup Word variable 
-  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Script:Word) | Out-Null
-  If(Test-Path variable:global:word) {
+  [Runtime.Interopservices.Marshal]::ReleaseComObject($Script:Word) | Out-Null
+  if(Test-Path variable:global:word) {
     Remove-Variable -Name word -Scope Global 4>$Null
   }
   $SaveFormat = $Null
@@ -601,33 +813,34 @@ function Close-WordDocument {
 
 function Select-WordEndOfDocument {
   # Return focus to main document    
-  $Script.WordDocument.ActiveWindow.ActivePane.view.SeekView = $wdSeekMainDocument
+  $Script:WordDocument.ActiveWindow.ActivePane.view.SeekView = $wdSeekMainDocument
 
   # Move to the end of the current document
   $Script:Selection.EndKey($wdStory,$wdMove) | Out-Null
 }
 
 function New-MicrosoftWordDocument {
+
   # Create a new ComObject instance of Word
 
   Write-Verbose -Message "$(Get-Date): Create Word ComObject"
   $Script:Word = New-Object -ComObject "Word.Application" -ErrorAction SilentlyContinue 4>$Null
   
-  If(!$? -or $Null -eq $Script:Word) {
+  if(!$? -or $Null -eq $Script:Word) {
+
     # Ooops, something went wrong
     Write-Warning -Message 'The Word ComObject could not be created. You may need to install Word or repair an existing installation.'
-    
     $ErrorActionPreference = $SavedErrerActionPreference
-    Write-Error -Message "The Word ComObject could not be created.`nYou may need to install Word or repair an existing installation."
+
     Exit
   }
   
   # As we have a Word ComObject, we can continue
   # Let's determine the language version 
-  If((Get-ValidStateProp -Object $Script:Word -TopLevel Language -SecondLevel Value__ )) {
+  if((Get-ValidStateProp -Object $Script:Word -TopLevel Language -SecondLevel Value__ )) {
     [int]$Script:WordLanguageValue = [int]$Script:Word.Language.Value__
   }
-  Else {
+  else {
     [int]$Script:WordLanguageValue = [int]$Script:Word.Language
   }
   
@@ -635,96 +848,98 @@ function New-MicrosoftWordDocument {
 
   $Script:WordCultureCode = Get-WordCultureCode -WordValue $Script:WordLanguageValue
 	
-  Set-WordHashTable $Script:WordCultureCode
+  Set-WordHashTable -CultureCode $Script:WordCultureCode
 
   # Check Word product version
-  # Supportted versions Word 2010 or newer
+  # Supported versions Word 2010 or newer
   [int]$Script:WordVersion = [int]$Script:Word.Version
-  If($Script:WordVersion -eq $wdWord2016) {
+
+  if($Script:WordVersion -eq $wdWord2016) {
     $Script:WordProduct = "Word 2016"
   }
-  ElseIf($Script:WordVersion -eq $wdWord2013)	{
+  elseif($Script:WordVersion -eq $wdWord2013)	{
     $Script:WordProduct = "Word 2013"
   }
-  ElseIf($Script:WordVersion -eq $wdWord2010) {
+  elseif($Script:WordVersion -eq $wdWord2010) {
     $Script:WordProduct = "Word 2010"
   }
-  ElseIf($Script:WordVersion -eq $wdWord2007)	{
+  elseif($Script:WordVersion -eq $wdWord2007)	{
     $ErrorActionPreference = $SavedErrerActionPreference
     Write-Error -Message "Microsoft Word 2007 is no longer supported.`nScript will end."
     Stop-Script
   }
-  Else {
+  else {
     $ErrorActionPreference = $SavedErrerActionPreference
     Write-Error -Message "You are running an untested or unsupported version of Microsoft Word.`nScript will end.`nPlease send info on your version of Word to thomas@mcsmemail.de"
     Stop-Script
   }
 
-  # o nly validate CompanyName if the field is blank
-  If([String]::IsNullOrEmpty($Script:CoName)) {
+  # only validate CompanyName if the field is blank
+  if([String]::IsNullOrEmpty($Script:CoName)) {
     Write-Verbose -Message "$(Get-Date): Company name is blank. Retrieve company name from registry."
-    $TmpName = ValidateCompanyName
+    
+    $TmpName = Get-CompanyName
 		
-    If([String]::IsNullOrEmpty($TmpName)) {
-      Write-Warning 'Company Name is blank so Cover Page will not show a Company Name.'
-      Write-Warning 'Check HKCU:\Software\Microsoft\Office\Common\UserInfo for Company or CompanyName value.'
-      Write-Warning 'You may want to use the -CompanyName parameter if you need a Company Name on the cover page.'
+    if([String]::IsNullOrEmpty($TmpName)) {
+      Write-Warning -Message 'Company Name is blank so Cover Page will not show a Company Name.'
+      Write-Warning -Message 'Check HKCU:\Software\Microsoft\Office\Common\UserInfo for Company or CompanyName value.'
+      Write-Warning -Message 'You may want to use the -CompanyName parameter if you need a Company Name on the cover page.'
     }
-    Else {
+    else {
       $Script:CoName = $TmpName
       Write-Verbose -Message ('{0}: Updated company name (CoName) to {1}' -f (Get-Date), $Script:CoName)
     }
   }
 
   # Check Word cover page and set localized template name
-  If($Script:WordCultureCode -ne 'en-') {
+  if($Script:WordCultureCode -ne 'en-') {
 
     Write-Verbose ('{0}: Check Default Cover Page for {1}' -f (Get-Date), $WordCultureCode)
 
     [bool]$CoverPageChanged = $False
     Switch ($Script:WordCultureCode) {
       'ca-'	{
-        If($CoverPage -eq 'Sideline') {
+        if($CoverPage -eq 'Sideline') {
           $CoverPage = 'Línia lateral'
           $CoverPageChanged = $True
         }
       }
 
       'da-'	{
-        If($CoverPage -eq 'Sideline') {
+        if($CoverPage -eq 'Sideline') {
           $CoverPage = 'Sidelinje'
           $CoverPageChanged = $True
         }
       }
 
       'de-'	{
-        If($CoverPage -eq 'Sideline') {
+        if($CoverPage -eq 'Sideline') {
           $CoverPage = 'Randlinie'
           $CoverPageChanged = $True
         }
       }
 
       'es-'	{
-        If($CoverPage -eq "Sideline")	{
+        if($CoverPage -eq "Sideline")	{
           $CoverPage = "Línea lateral"
           $CoverPageChanged = $True
         }
       }
 
       'fi-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "Sivussa"
           $CoverPageChanged = $True
         }
       }
 
       'fr-'	{
-        If($CoverPage -eq "Sideline")	{
-          If($Script:WordVersion -eq $wdWord2013 -or $Script:WordVersion -eq $wdWord2016) {
+        if($CoverPage -eq "Sideline")	{
+          if($Script:WordVersion -eq $wdWord2013 -or $Script:WordVersion -eq $wdWord2016) {
             $CoverPage = "Lignes latérales"
             $CoverPageChanged = $True
           }
-          Else {
+          else {
             $CoverPage = "Ligne latérale"
             $CoverPageChanged = $True
           }
@@ -732,42 +947,42 @@ function New-MicrosoftWordDocument {
       }
 
       'nb-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "Sidelinje"
           $CoverPageChanged = $True
         }
       }
 
       'nl-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "Terzijde"
           $CoverPageChanged = $True
         }
       }
 
       'pt-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "Linha Lateral"
           $CoverPageChanged = $True
         }
       }
 
       'sv-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "Sidlinje"
           $CoverPageChanged = $True
         }
       }
 
       'zh-'	{
-        If($CoverPage -eq "Sideline") {
+        if($CoverPage -eq "Sideline") {
           $CoverPage = "边线型"
           $CoverPageChanged = $True
         }
       }
     }
 
-    If($CoverPageChanged) {
+    if($CoverPageChanged) {
       Write-Verbose ('{0}: Changed Default Cover Page from "Sideline" to "{1}"' -f (Get-Date), $CoverPage)
     }
   }
@@ -777,7 +992,7 @@ function New-MicrosoftWordDocument {
   [bool]$ValidCoverPage = $False	
   $ValidCoverPage = Test-WordCoverPage -WordVersion $Script:WordVersion -CoverPage $CoverPage -CultureCode $Script:WordCultureCode
   
-  If(!$ValidCoverPage)	{
+  if(!$ValidCoverPage)	{
 
     # stop script, if Word cover page is not valid
     $ErrorActionPreference = $SavedErrerActionPreference
@@ -804,7 +1019,7 @@ function New-MicrosoftWordDocument {
   $Script:Word.Templates.LoadBuildingBlocks()
 
   # Word 2010/2013/2016
-  $BuildingBlocksCollection = $Script:Word.Templates | Where-Object {$_.Name -eq "Built-In Building Blocks.dotx"}
+  $BuildingBlocksCollection = $Script:Word.Templates | Where-Object {$_.Name -eq 'Built-In Building Blocks.dotx'}
   
   $part = $Null
 
@@ -820,10 +1035,10 @@ function New-MicrosoftWordDocument {
 
     $BuildingBlocksExist = $True
 
-    Try {
+    try {
       $part = $BuildingBlocks.BuildingBlockEntries.Item($CoverPage)
     }
-    Catch	{
+    catch	{
       $part = $Null
     }
 
@@ -841,7 +1056,7 @@ function New-MicrosoftWordDocument {
   # Create a new Word document in the current Word instance
   $Script:WordDocument = $Script:Word.Documents.Add()
 
-  If($Null -eq $Script:WordDocument) {
+  if($Null -eq $Script:WordDocument) {
     # failed to create a new Word document
     		
     $ErrorActionPreference = $SavedErrerActionPreference
@@ -851,7 +1066,7 @@ function New-MicrosoftWordDocument {
   }
 
   $Script:Selection = $Script:Word.Selection
-  If($Null -eq $Script:Selection) {
+  if($Null -eq $Script:Selection) {
     # Some error occured 
 
     $ErrorActionPreference = $SavedErrerActionPreference
@@ -883,27 +1098,27 @@ function New-MicrosoftWordDocument {
     if($Null -eq $toc) {
       Write-Warning -Message 'This report will not have a Table of Contents.'
     }
-    Else {
+    else {
       $toc.Insert($Script:Selection.Range,$True) | Out-Null
     }
   }
-  Else {
+  else {
     Write-Warning -Message 'Table of Contents (TOC) are not installed so this report will not have a Table of Contents.'
   }  
 
   #region Footer 
 
   # Set the document footer text
-  [string]$FooterText = ('Report created by {0}' -f $UserName)
+  [string]$FooterText = ('Report created by {0} on {1}' -f $UserName, $GeneratedOn)
 
   # Fetch footer for additional configuration
-  $Script.WordDocument.ActiveWindow.ActivePane.view.SeekView = $wdSeekPrimaryFooter
+  $Script:WordDocument.ActiveWindow.ActivePane.view.SeekView = $wdSeekPrimaryFooter
 
   # Get the footer and format font
-  $Footers = $Script.WordDocument.Sections.Last.Footers
+  $Footers = $Script:WordDocument.Sections.Last.Footers
 
   ForEach ($Footer in $Footers) {
-    If($Footer.exists) {
+    if($Footer.exists) {
       # Set font
       $Footer.Range.Font.name = "Calibri"
       $Footer.Range.Font.size = 8
@@ -930,10 +1145,10 @@ Function Get-ValidStateProp {
     [string] $TopLevel, 
     [string] $SecondLevel
   )
-  If( $Object ) {
-    If((Get-Member -Name $TopLevel -InputObject $Object)) {
+  if( $Object ) {
+    if((Get-Member -Name $TopLevel -InputObject $Object)) {
     
-      If((Get-Member -Name $SecondLevel -InputObject $Object.$TopLevel)) {
+      if((Get-Member -Name $SecondLevel -InputObject $Object.$TopLevel)) {
         Return $True
       }
     }
@@ -973,8 +1188,8 @@ function Set-DocumentProperty {
   try {
     $binding = "System.Reflection.BindingFlags" -as [type]
     $builtInProperties = $Document.BuiltInDocumentProperties
-    $property = [System.__ComObject].invokemember("item", $binding::GetProperty, $null, $BuiltinProperties, $DocProperty)
-    [System.__ComObject].invokemember("value", $binding::SetProperty, $null, $property, $Value)
+    $property = [__ComObject].invokemember("item", $binding::GetProperty, $null, $BuiltinProperties, $DocProperty)
+    [__ComObject].invokemember("value", $binding::SetProperty, $null, $property, $Value)
   }
   catch {
     Write-Warning -Message ('Failed to set {0} to {1}' -f $DocProperty, $Value)
@@ -1008,7 +1223,7 @@ function Update-DocumentProperty {
       if([String]::IsNullOrEmpty($Script:CoName))	{
         [string]$Abstrac = $AbstractTitle
       }
-      Else {
+      else {
         [string]$Abstract = ('{0} for {1}' -f $AbstractTitle, $Script:CoName)
       }
 
@@ -1045,21 +1260,20 @@ function Update-DocumentProperty {
 }
 
 function Add-WordTable {
-  [CmdletBinding()]
   Param	(
     # Array of Hashtable (including table headers)
-    [Parameter(Mandatory=$True, ValueFromPipelineByPropertyName=$True, ParameterSetName='Hashtable', Position=0)]
-    [ValidateNotNullOrEmpty()] [System.Collections.Hashtable[]] $Hashtable,
+    [Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName='Hashtable', Position=0)]
+    [ValidateNotNullOrEmpty()] [Collections.Hashtable[]] $Hashtable,
     # Array of PSCustomObjects
-    [Parameter(Mandatory=$True, ValueFromPipelineByPropertyName=$True, ParameterSetName='CustomObject', Position=0)]
+    [Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName='CustomObject', Position=0)]
     [ValidateNotNullOrEmpty()] [PSCustomObject[]] $CustomObject,
     # Array of Hashtable key names or PSCustomObject property names to include, in display order.
-    # If not supplied then all Hashtable keys or all PSCustomObject properties will be displayed.
-    [Parameter(ValueFromPipelineByPropertyName=$True)] [AllowNull()] [string[]] $Columns = $Null,
+    # if not supplied then all Hashtable keys or all PSCustomObject properties will be displayed.
+    [Parameter(ValueFromPipelineByPropertyName)] [AllowNull()] [string[]] $Columns = $Null,
     # Array of custom table header strings in display order.
-    [Parameter(ValueFromPipelineByPropertyName=$True)] [AllowNull()] [string[]] $Headers = $Null,
+    [Parameter(ValueFromPipelineByPropertyName)] [AllowNull()] [string[]] $Headers = $Null,
     # AutoFit table behavior.
-    [Parameter(ValueFromPipelineByPropertyName=$True)] [AllowNull()] [int] $AutoFit = -1,
+    [Parameter(ValueFromPipelineByPropertyName)] [AllowNull()] [int] $AutoFit = -1,
     # List view (no headers)
     [Switch] $List,
     # Grid lines
@@ -1067,30 +1281,30 @@ function Add-WordTable {
     [Switch] $NoInternalGridLines,
     # Built-in Word table formatting style constant
     # Would recommend only $wdTableFormatContempory for normal usage (possibly $wdTableFormatList5 for List view)
-    [Parameter(ValueFromPipelineByPropertyName=$True)] [int] $Format = 0
+    [Parameter(ValueFromPipelineByPropertyName)] [int] $Format = 0
   )
 
   Begin {
     ## Check if -Columns wasn't specified but -Headers were (saves some additional parameter sets!)
-    If(($Null -eq $Columns) -and ($Null -ne $Headers)) {
+    if(($Null -eq $Columns) -and ($Null -ne $Headers)) {
       Write-Warning -Message 'No columns specified and therefore, specified headers will be ignored.'
       $Columns = $Null
     }
-    ElseIf(($Null -ne $Columns) -and ($Null -ne $Headers)) {
+    elseif(($Null -ne $Columns) -and ($Null -ne $Headers)) {
       ## Check if number of specified -Columns matches number of specified -Headers
-      If($Columns.Length -ne $Headers.Length) {
+      if($Columns.Length -ne $Headers.Length) {
         Write-Error -Message 'The specified number of columns does not match the specified number of headers.'
       }
-    } ## end ElseIf
+    } ## end elseif
   } ## end Begin
 
   Process	{
     ## Build the Word table data string to be converted to a range and then a table later.
-    [System.Text.StringBuilder] $WordRangeString = New-Object System.Text.StringBuilder
+    [Text.StringBuilder] $WordRangeString = New-Object System.Text.StringBuilder
 
     Switch ($PSCmdlet.ParameterSetName) {
       'CustomObject'  {
-        If($Null -eq $Columns) {
+        if($Null -eq $Columns) {
           ## Build the available columns from all available PSCustomObject note properties
           [string[]] $Columns = @()
           ## Add each NoteProperty name to the array
@@ -1100,11 +1314,11 @@ function Add-WordTable {
         }
 
         ## Add the table headers from -Headers or -Columns (except when in -List(view)
-        If(-not $List) 	{
-          If($Null -ne $Headers){
+        if(-not $List) 	{
+          if($Null -ne $Headers){
             [ref] $Null = $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Headers))
           }
-          Else { 
+          else { 
             [ref] $Null = $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Columns))
           }
         }
@@ -1124,18 +1338,18 @@ function Add-WordTable {
 
       Default {   
         ## Hashtable
-        If($Null -eq $Columns) {
+        if($Null -eq $Columns) {
           ## Build the available columns from all available hashtable keys. Hopefully
           ## all Hashtables have the same keys (they should for a table).
           $Columns = $Hashtable[0].Keys
         }
 
         ## Add the table headers from -Headers or -Columns (except when in -List(view)
-        If(-not $List) {
-          If($Null -ne $Headers) { 
+        if(-not $List) {
+          if($Null -ne $Headers) { 
             [ref] $Null = $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Headers))
           }
-          Else {
+          else {
             [ref] $Null = $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Columns))
           }
         }
@@ -1164,13 +1378,13 @@ function Add-WordTable {
     $ConvertToTableArguments = @{ Separator = [Microsoft.Office.Interop.Word.WdTableFieldSeparator]::wdSeparateByTabs }
 
     ## Negative built-in styles are not supported by the ConvertToTable method
-    If($Format -ge 0) {
+    if($Format -ge 0) {
       $ConvertToTableArguments.Add("Format", $Format)
       $ConvertToTableArguments.Add("ApplyBorders", $True)
       $ConvertToTableArguments.Add("ApplyShading", $True)
       $ConvertToTableArguments.Add("ApplyFont", $True)
       $ConvertToTableArguments.Add("ApplyColor", $True)
-      If(!$List) { 
+      if(!$List) { 
         $ConvertToTableArguments.Add("ApplyHeadingRows", $True)
       }
       $ConvertToTableArguments.Add("ApplyLastRow", $True)
@@ -1183,7 +1397,7 @@ function Add-WordTable {
     ## Store the table reference just in case we need to set alternate row coloring
     $WordTable = $WordRange.GetType().InvokeMember(
       "ConvertToTable",                               # Method name
-      [System.Reflection.BindingFlags]::InvokeMethod, # Flags
+      [Reflection.BindingFlags]::InvokeMethod, # Flags
       $Null,                                          # Binder
       $WordRange,                                     # Target (self!)
       ([Object[]]($ConvertToTableArguments.Values)),  ## Named argument values
@@ -1193,29 +1407,29 @@ function Add-WordTable {
     )
 
     ## Implement grid lines (will wipe out any existing formatting
-    If($Format -lt 0) {
+    if($Format -lt 0) {
       $WordTable.Style = $Format
     }
 
     ## Set the table autofit behavior
-    If($AutoFit -ne -1) { 
+    if($AutoFit -ne -1) { 
       $WordTable.AutoFitBehavior($AutoFit)
     }
 
-    If(!$List) {
+    if(!$List) {
       #the next line causes the heading row to flow across page breaks
       $WordTable.Rows.First.Headingformat = $wdHeadingFormatTrue
     }
 
-    If(!$NoGridLines) {
+    if(!$NoGridLines) {
       $WordTable.Borders.InsideLineStyle = $wdLineStyleSingle
       $WordTable.Borders.OutsideLineStyle = $wdLineStyleSingle
     }
-    If($NoGridLines) {
+    if($NoGridLines) {
       $WordTable.Borders.InsideLineStyle = $wdLineStyleNone
       $WordTable.Borders.OutsideLineStyle = $wdLineStyleNone
     }
-    If($NoInternalGridLines) {
+    if($NoInternalGridLines) {
       $WordTable.Borders.InsideLineStyle = $wdLineStyleNone
       $WordTable.Borders.OutsideLineStyle = $wdLineStyleSingle
     }
@@ -1229,13 +1443,13 @@ function Set-WordCellFormat {
   [CmdletBinding(DefaultParameterSetName='Collection')]
   Param (
     # Word COM object cell collection reference
-    [Parameter(Mandatory=$true, ValueFromPipeline=$true, ParameterSetName='Collection', Position=0)] [ValidateNotNullOrEmpty()] $Collection,
+    [Parameter(Mandatory, ValueFromPipeline, ParameterSetName='Collection', Position=0)] [ValidateNotNullOrEmpty()] $Collection,
     # Word COM object individual cell reference
-    [Parameter(Mandatory=$true, ParameterSetName='Cell', Position=0)] [ValidateNotNullOrEmpty()] $Cell,
+    [Parameter(Mandatory, ParameterSetName='Cell', Position=0)] [ValidateNotNullOrEmpty()] $Cell,
     # Hashtable of cell co-ordinates
-    [Parameter(Mandatory=$true, ParameterSetName='Hashtable', Position=0)] [ValidateNotNullOrEmpty()] [System.Collections.Hashtable[]] $Coordinates,
+    [Parameter(Mandatory, ParameterSetName='Hashtable', Position=0)] [ValidateNotNullOrEmpty()] [Collections.Hashtable[]] $Coordinates,
     # Word COM object table reference
-    [Parameter(Mandatory=$true, ParameterSetName='Hashtable', Position=1)] [ValidateNotNullOrEmpty()] $Table,
+    [Parameter(Mandatory, ParameterSetName='Hashtable', Position=1)] [ValidateNotNullOrEmpty()] $Table,
     # Font name
     [Parameter()] [AllowNull()] [string] $Font = $Null,
     # Font color
@@ -1259,40 +1473,40 @@ function Set-WordCellFormat {
       'Collection' {
         ForEach($Cell in $Collection) 
         {
-          If($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
-          If($Bold) { $Cell.Range.Font.Bold = $true }
-          If($Italic) { $Cell.Range.Font.Italic = $true }
-          If($Underline) { $Cell.Range.Font.Underline = 1 }
-          If($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
-          If($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
-          If($Size -ne 0) { $Cell.Range.Font.Size = $Size }
-          If($Solid) { $Cell.Shading.Texture = 0 } ## wdTextureNone
+          if($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
+          if($Bold) { $Cell.Range.Font.Bold = $true }
+          if($Italic) { $Cell.Range.Font.Italic = $true }
+          if($Underline) { $Cell.Range.Font.Underline = 1 }
+          if($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
+          if($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
+          if($Size -ne 0) { $Cell.Range.Font.Size = $Size }
+          if($Solid) { $Cell.Shading.Texture = 0 } ## wdTextureNone
         } # end ForEach
       } # end Collection
       'Cell' 
       {
-        If($Bold) { $Cell.Range.Font.Bold = $true }
-        If($Italic) { $Cell.Range.Font.Italic = $true }
-        If($Underline) { $Cell.Range.Font.Underline = 1 }
-        If($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
-        If($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
-        If($Size -ne 0) { $Cell.Range.Font.Size = $Size }
-        If($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
-        If($Solid) { $Cell.Shading.Texture = 0; } ## wdTextureNone
+        if($Bold) { $Cell.Range.Font.Bold = $true }
+        if($Italic) { $Cell.Range.Font.Italic = $true }
+        if($Underline) { $Cell.Range.Font.Underline = 1 }
+        if($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
+        if($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
+        if($Size -ne 0) { $Cell.Range.Font.Size = $Size }
+        if($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
+        if($Solid) { $Cell.Shading.Texture = 0; } ## wdTextureNone
       } # end Cell
       'Hashtable' 
       {
         ForEach($Coordinate in $Coordinates) 
         {
           $Cell = $Table.Cell($Coordinate.Row, $Coordinate.Column)
-          If($Bold) { $Cell.Range.Font.Bold = $true }
-          If($Italic) { $Cell.Range.Font.Italic = $true }
-          If($Underline) { $Cell.Range.Font.Underline = 1 }
-          If($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
-          If($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
-          If($Size -ne 0) { $Cell.Range.Font.Size = $Size }
-          If($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
-          If($Solid) { $Cell.Shading.Texture = 0 } ## wdTextureNone
+          if($Bold) { $Cell.Range.Font.Bold = $true }
+          if($Italic) { $Cell.Range.Font.Italic = $true }
+          if($Underline) { $Cell.Range.Font.Underline = 1 }
+          if($Null -ne $Font) { $Cell.Range.Font.Name = $Font }
+          if($Null -ne $Color) { $Cell.Range.Font.Color = $Color }
+          if($Size -ne 0) { $Cell.Range.Font.Size = $Size }
+          if($Null -ne $BackgroundColor) { $Cell.Shading.BackgroundPatternColor = $BackgroundColor }
+          if($Solid) { $Cell.Shading.Texture = 0 } ## wdTextureNone
         }
       } # end Hashtable
     } # end switch
@@ -1315,69 +1529,6 @@ function Show-ScriptOptions {
     if($ExportTo -eq 'MSWord') {
       Write-Verbose -Message ('Company Name    : {0}' -f $Script:CoName)
     }
-  }
-}
-
-Function Write-WordLine
-#Function created by Ryan Revord
-#@rsrevord on Twitter
-#Function created to make output to Word easy in this script
-#updated 27-Mar-2014 to include font name, font size, italics and bold options
-{
-  Param(
-    [int]$Style=0, 
-    [int]$Tabs = 0, 
-    [string]$Name = '', 
-    [string]$Value = '', 
-    [string]$FontName=$Null,
-    [int]$FontSize=0,
-    [bool]$Italics=$False,
-    [bool]$Boldface=$False,
-  [Switch]$NoNewLine)
-	
-  #Build output style
-  [string]$output = ""
-  Switch ($style) {
-    0 {$Script:Selection.Style = $Script:MyHash.Word_NoSpacing; Break}
-    1 {$Script:Selection.Style = $Script:MyHash.Word_Heading1; Break}
-    2 {$Script:Selection.Style = $Script:MyHash.Word_Heading2; Break}
-    3 {$Script:Selection.Style = $Script:MyHash.Word_Heading3; Break}
-    4 {$Script:Selection.Style = $Script:MyHash.Word_Heading4; Break}
-    Default {$Script:Selection.Style = $Script:MyHash.Word_NoSpacing; Break}
-  }
-	
-  #build # of tabs
-  While($tabs -gt 0) 	{ 
-    $output += "`t"
-    $tabs--
-  }
- 
-  If(![String]::IsNullOrEmpty($fontName)) {
-    $Script:Selection.Font.name = $fontName
-  } 
-
-  If($fontSize -ne 0) 	{
-    $Script:Selection.Font.size = $fontSize
-  } 
- 
-  If($italics -eq $True) {
-    $Script:Selection.Font.Italic = $True
-  } 
- 
-  If($boldface -eq $True) {
-    $Script:Selection.Font.Bold = $True
-  } 
-
-  #output the rest of the parameters.
-  $output += $name + $value
-  $Script:Selection.TypeText($output)
- 
-  #test for new WriteWordLine 0.
-  If($nonewline) {
-    # Do nothing.
-  } 
-  Else {
-    $Script:Selection.TypeParagraph()
   }
 }
 
@@ -1436,38 +1587,36 @@ function Get-ExchangeOrganizationConfig {
 
   Show-ProgressBar -Status 'Get-ExchangeOrganization' -PercentComplete 10 -Stage 1
 
-  # Fetch Exchange Org config
   $OrgConfig = Get-OrganizationConfig 
 
   $Script:ExchangeOrgName = $OrgConfig.Name
 
-  # Public Folder Information
-  [System.Collections.Hashtable[]]$PublicFolderInformation = @()
+  [Collections.Hashtable[]]$PublicFolderInformation = @()
   
-  $PublicFolderInformation += @{ Data = "PublicFoldersEnabled"; Value = $OrgConfig.PublicFoldersEnabled; }
-  $PublicFolderInformation += @{ Data = "PublicFoldersLockedForMigration"; Value = $OrgConfig.PublicFoldersLockedForMigration; }
-  $PublicFolderInformation += @{ Data = "PublicFolderMigrationComplete"; Value = $OrgConfig.PublicFolderMigrationComplete; }
-  $PublicFolderInformation += @{ Data = "PublicFolderMailboxesLockedForNewConnections"; Value = $OrgConfig.PublicFolderMailboxesLockedForNewConnections; }
-  $PublicFolderInformation += @{ Data = "PublicFolderMailboxesMigrationComplete"; Value = $OrgConfig.PublicFolderMailboxesMigrationComplete; }
-  $PublicFolderInformation += @{ Data = "PublicFolderShowClientControl"; Value = $OrgConfig.PublicFolderShowClientControl; }
+  $PublicFolderInformation += @{ Data = "PublicFolders Enabled"; Value = $OrgConfig.PublicFoldersEnabled; }
+  $PublicFolderInformation += @{ Data = "PublicFolders Locked For Migration"; Value = $OrgConfig.PublicFoldersLockedForMigration; }
+  $PublicFolderInformation += @{ Data = "PublicFolder Migration Complete"; Value = $OrgConfig.PublicFolderMigrationComplete; }
+  $PublicFolderInformation += @{ Data = "PublicFolder Mailboxes Locked For New Connections"; Value = $OrgConfig.PublicFolderMailboxesLockedForNewConnections; }
+  $PublicFolderInformation += @{ Data = "PublicFolder Mailboxes Migration Complete"; Value = $OrgConfig.PublicFolderMailboxesMigrationComplete; }
+  $PublicFolderInformation += @{ Data = "PublicFolder Show Client Control"; Value = $OrgConfig.PublicFolderShowClientControl; }
   
   # Default 
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderAgeLimit"; Value = $OrgConfig.DefaultPublicFolderAgeLimit; }
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderIssueWarningQuota"; Value = $OrgConfig.DefaultPublicFolderIssueWarningQuota; }
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderProhibitPostQuota"; Value = $OrgConfig.DefaultPublicFolderProhibitPostQuota; }
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderMaxItemSize"; Value = $OrgConfig.DefaultPublicFolderMaxItemSize; }
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderDeletedItemRetention"; Value = $OrgConfig.DefaultPublicFolderDeletedItemRetention; }
-  $PublicFolderInformation += @{ Data = "DefaultPublicFolderMovedItemRetention"; Value = $OrgConfig.DefaultPublicFolderMovedItemRetention; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder Age Limit"; Value = $OrgConfig.DefaultPublicFolderAgeLimit; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder IssueWarning Quota"; Value = $OrgConfig.DefaultPublicFolderIssueWarningQuota; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder ProhibitPost Quota"; Value = $OrgConfig.DefaultPublicFolderProhibitPostQuota; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder MaxItemSize"; Value = $OrgConfig.DefaultPublicFolderMaxItemSize; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder DeletedItem Retention"; Value = $OrgConfig.DefaultPublicFolderDeletedItemRetention; }
+  $PublicFolderInformation += @{ Data = "Default PublicFolder MovedItem Retention"; Value = $OrgConfig.DefaultPublicFolderMovedItemRetention; }
 
   $SectionTitle = ('Exchange Organization {0}' -f $OrgConfig.Name)
   
-  $Text = ('Active Directory Forest {1} contains an Exchange Organization named {0}. The following table shows the organization configuration settings active on {2}.' -f $OrgConfig.Name, $Script:Forest.Name, $GeneratedOn)
+  $Text = ('Active Directory Forest {1} contains an Exchange Organization named {0}. The following table shows selected organization configuration settings active on {2}.' -f $OrgConfig.Name, $Script:Forest.Name, $GeneratedOn)
   
   if($ExportTo -eq 'MSWord') {
     
     Write-WordLine -Style 0 -Tabs 0 -Name $Text 
     Write-EmptyWordLine
-    Write-WordLine -Style 0 -Tabs 0 -Name 'Exchange Organization Configuration' 
+    Write-WordLine -Style 3 -Tabs 0 -Name 'Exchange Organization Configuration' 
 
     $Table = Add-WordTable -Hashtable $PublicFolderInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
@@ -1490,7 +1639,6 @@ function Get-RecipientInformation {
 
   Show-ProgressBar -Status 'Get Recipient Information - Fetching Mailbox Users' -PercentComplete 15 -Stage 1
 
-  # Fetch all user mailboxes
   $Mailboxes = Get-Mailbox -Resultsize Unlimited 
 
   Show-ProgressBar -Status 'Get Recipient Information - Analyzing Mailbox Users' -PercentComplete 15 -Stage 1
@@ -1533,9 +1681,7 @@ function Get-RecipientInformation {
   $DynamicDistributionGroupCount = ($DistributionGroups | Where-Object{$_.RecipientTypeDetails -eq 'DynamicDistributionGroup'}).Count
   $MailUniversalDistributionGroup = ($DistributionGroups | Where-Object{$_.RecipientTypeDetails -eq 'MailUniversalDistributionGroup'}).Count
 
-
-  # Recipient Information
-  [System.Collections.Hashtable[]]$RecipientInformation = @()
+  [Collections.Hashtable[]]$RecipientInformation = @()
 
   # Mailboxes and Contacts
   $RecipientInformation += @{ Data = "Mailboxes"; Value = $MailboxCount; }
@@ -1590,11 +1736,9 @@ function Get-AcceptedDomainInformation {
 
   Show-ProgressBar -Status 'Get Accepted Domain Information' -PercentComplete 15 -Stage 1
 
-  # Fetch all user mailboxes
   $Domains = Get-AcceptedDomain | Sort-Object DomainName 
 
-  # Recipient Information
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
   foreach($Domain in $Domains) {
 
@@ -1609,7 +1753,6 @@ function Get-AcceptedDomainInformation {
   $SectionTitle = 'Accepted Domains'
   $Text = ('The Exchange Organization contains {0} accepted domains.' -f $Domains.Count)
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
@@ -1642,26 +1785,48 @@ function Expand-Object {
     [psobject]$Object
   )
 
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  $Object | Get-Member -Type property | ForEach name | foreach {
+  $Object | Get-Member -Type property | foreach name | foreach {
 
-    $Value = $Object.$_.ToString()
+    $Value = ''
 
-    if($Object.$_.GetType().BaseType.FullName -eq 'Microsoft.Exchange.Data.MultiValuedPropertyBase' `
-    -or $Object.$_.GetType().Name -eq 'ApprovedApplicationCollection' `
-    -or $Object.$_.GetType().BaseType.FullName -eq 'Microsoft.Exchange.MessagingPolicies.Rules.Tasks.TransportRuleAction[]') {
-      $Value = ($Object.$_ -join ', ')
+    if($Object.$_ -eq $null) {
+      $Value = ''
     }
-    # elseif ($Object.$_.GetType().BaseType.GenericTypeArguments.Name -eq 'ADObjectId') {
-    elseif($Object.$_ -eq 'RoleAssignments') { 
-      #$Value = 'Not exported to Word'
+    else { 
+      $Value = $Object.$_.ToString()
     }
-    elseif($Object.$_.GetType().BaseType.GenericTypeArguments.Name -eq 'ADObjectId') { 
-      $Value = ($Object.$_.Name -join ', ')
+
+    try { 
+
+      if($Object.$_.GetType().BaseType.FullName -eq 'Microsoft.Exchange.Data.MultiValuedPropertyBase' `
+      -or $Object.$_.GetType().Name -eq 'ApprovedApplicationCollection') {
+        $Value = ($Object.$_ -join ', ')
+      }
+      # elseif ($Object.$_.GetType().BaseType.GenericTypeArguments.Name -eq 'ADObjectId') {
+      elseif($Object.$_ -eq 'RoleAssignments') { 
+        #$Value = 'Not exported to Word'
+      }
+      elseif($Object.$_.GetType().FullName -eq 'Microsoft.Exchange.MessagingPolicies.Rules.Tasks.TransportRuleAction[]') {
+        $Value = $NotExported
+      }
+      elseif($Object.$_.GetType().FullName -eq 'Microsoft.Exchange.MessagingPolicies.Rules.Tasks.TransportRulePredicate[]') {
+        $Value = $NotExported
+      }
+      elseif($Object.$_.GetType().FullName -eq 'Microsoft.Exchange.Configuration.Tasks.RecipientIdParameter[]') {
+        $Value = $NotExported 
+      }
+      elseif($Object.$_.GetType().BaseType.GenericTypeArguments.Name -eq 'ADObjectId') { 
+        $Value = ($Object.$_.Name -join ', ')
+      }
     }
+    catch {
+      $Value = "Error while converting $($Object.Name)"    }
 
     # add to hash table
+    #$Value = Optimize-String -Value $Value
+
     $ObjectInformation += @{ Data = "$($_)"; Value = $($Value); } 
 
     # Write-Verbose "$($_) : $($Object.$_.GetType().ToString())"
@@ -1675,27 +1840,22 @@ function Get-TransportConfigInformation {
 
   Show-ProgressBar -Status 'Get Transport Config Information' -PercentComplete 15 -Stage 1
 
-  # Fetch all user mailboxes
   $TransportConfig = Get-TransportConfig
 
   $SomeCount = 0
 
-  # Hash table for transport config
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # Store transport config in hash table
   $ObjectInformation = Expand-Object -Object $TransportConfig
 
   if($TransportConfig.ExternalPostmasterAddress -eq '') {
     $ErrorText += 'The ExternalPostmasterAddress is not configured. According to RFC5321 any system supporting mail relaying or delivery must support the reserved mailbox with postmaster as a local name.'
   }
 
-  # save SafetyNetHoldTime for later analysis
   $Script:SafetyNetHoldTime = $ObjectInformation.SafetyNetHoldTime
 
   $SectionTitle = 'Transport Config'
   
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
@@ -1724,30 +1884,36 @@ function Get-TransportConfigInformation {
   }
 }
 
-function Get-DatabaseInformation {
+function Get-DatabaseOverviewInformation {
 
-  Show-ProgressBar -Status 'Get Object Information - Some Information' -PercentComplete 15 -Stage 1
+  Show-ProgressBar -Status 'Database Overview Information' -PercentComplete 15 -Stage 1
 
   # Internal Notes
   # When you set the replay lag time you will see a warning about the SafetyNetHoldTime as well. It is always recommended to set Safety Net hold time to the same value or greater value than the replay lag time.
   # https://practical365.com/exchange-server/exchange-server-2013-lagged-database-copies-action/
 
+  $ModernMailboxDatabases = Get-MailboxDatabase -Status | Sort-Object -Property Name
+  $ModernMailboxDatabaseCount = ($ModernMailboxDatabases | Measure-Object).Count
 
-  # Fetch all user mailboxes
-  $Object = Get-Mailbox -Resultsize Unlimited 
+  $MailboxDatabases = Get-MailboxDatabase -Status -IncludePreExchange2013 | Sort-Object -Property Name
+  $MailboxDatabaseCount = (($MailboxDatabases | Measure-Object).Count) - $ModernMailboxDatabaseCount
+  $MailboxDatabasesWithoutCopies = ($MailboxDatabases | ?{$_.ReplicationType -eq 'None'} | Measure-Object).Count
+  $RecoveryMailboxCount = ($MailboxDatabases | ?{$_.Recovery -eq $true} | Measure-Object).Count
 
-  $SomeCount = 0
+  $PublicFolderDatabases = Get-PublicFolderDatabase -Status | Sort-Object -Property Name
+  $PublicFolderDatabaseCount = ($PublicFolderDatabases | Measure-Object).Count
 
-  # Recipient Information
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # Mailboxes and Contacts
-  $ObjectInformation += @{ Data = "Mailboxes"; Value = $SomeCount; }
+  $ObjectInformation += @{ Data = 'Mailbox Databases'; Value = $ModernMailboxDatabaseCount; }
+  $ObjectInformation += @{ Data = 'Single Mailbox Databases'; Value = $MailboxDatabasesWithoutCopies; }
+  $ObjectInformation += @{ Data = 'Recovery Mailbox Databases'; Value = $RecoveryMailboxCount; }
+  $ObjectInformation += @{ Data = 'Legacy Mailbox Databases'; Value = $MailboxDatabaseCount; }
+  $ObjectInformation += @{ Data = 'Legacy Public Folder Databases'; Value = $PublicFolderDatabaseCount; }
 
-  $SectionTitle = 'Object Header'
+  $SectionTitle = 'Database Overview'
   $Text = ''
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
@@ -1775,34 +1941,28 @@ function Get-AdminPermissionInformation {
 
   Show-ProgressBar -Status 'Get Permission Information' -PercentComplete 15 -Stage 1
 
-  # Fetch all role groups
   $RoleGroups = Get-RoleGroup | Sort-Object Name 
 
   $RoleCount = ($RoleGroups | Measure-Object).Count
 
-  # HashTable 
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # Mailboxes and Contacts
   foreach($RoleGroup in $RoleGroups) {
     
     $RoleGroupMembers = Get-RoleGroup $RoleGroup.Name | Get-RoleGroupMember
 
     if($RoleGroupMembers.Count -ne 0) { 
 
-      $Members = [System.Collections.ArrayList]@()
+      $Members = [Collections.ArrayList]@()
 
       foreach($Member in $RoleGroupMembers) {
 
-        # add role member to members array
         $Members.Add(('{0} ({1})' -f $Member.Name, $Member.RecipientType)) | Out-Null
       }
 
-      # convert array to string 
       $MembersString = $Members -join ', '
     }
     else {
-      # no members in that role group
       $MembersString = 'None'
     }
   
@@ -1829,7 +1989,7 @@ function Get-AdminPermissionInformation {
     -Headers 'Role Group Name','Role Group Members' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 150
     $Table.Columns.Item(2).Width = 250
@@ -1848,18 +2008,14 @@ function Get-UserRoleAssignmentPolicies {
 
   Show-ProgressBar -Status 'Get User Role Assignment Policies' -PercentComplete 15 -Stage 1
 
-  # Fetch all user mailboxes
   $RoleAssignmentPolicies = Get-RoleAssignmentPolicy | Sort-Object Name
 
   $PolicyCount = ($RoleAssignmentPolicies | Measure-Object).Count
 
-  # Hash table for user role assignment overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # Hash table for user role assignment policy details
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # process each policy
   foreach ($Policy in $RoleAssignmentPolicies) {
     
     Show-ProgressBar -Status ('Fetching data for Role Assignment Policy [{0}]' -f $Policy.Name) -PercentComplete 15 -Stage 1
@@ -1878,10 +2034,7 @@ function Get-UserRoleAssignmentPolicies {
 
   $Text = "The Exchange Organization has $($PolicyCount) user role assignment policies."
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
-
-    # write policy overview to document
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
 
@@ -1894,7 +2047,7 @@ function Get-UserRoleAssignmentPolicies {
     -Headers 'Policy Name','IsDefault', 'Assigned Users' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 200
     $Table.Columns.Item(2).Width = 80
@@ -1907,32 +2060,31 @@ function Get-UserRoleAssignmentPolicies {
 
     Write-EmptyWordLine
 
-    # write policy details to Word document
+    if($IncludeDetails) { 
     
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
 
-    foreach ($Policy in $RoleAssignmentPolicies) {
+      foreach ($Policy in $RoleAssignmentPolicies) {
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $Policy
+        $ObjectInformation = Expand-Object -Object $Policy
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
-      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-      Select-WordEndOfDocument
+        Select-WordEndOfDocument
 
-      $Table = $Null
+        $Table = $Null
 
-      Write-EmptyWordLine 
+        Write-EmptyWordLine 
+      }
     }
   }
 }
@@ -1941,20 +2093,16 @@ function Get-OutlookWebAppPolicies {
 
   Show-ProgressBar -Status 'Get OWA Mailbox policies' -PercentComplete 15 -Stage 1
 
-  # Fetch 
   $OwaMailboxPolicies = Get-OwaMailboxPolicy 
 
   $OwaMailboxPolicyCount = ($OwaMailboxPolicies |Measure-Object).Count
 
-  # Hash table for OWA policy assignment overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
   $CASMailboxes = Get-CASMailbox -ResultSize Unlimited
 
-  # process each policy
   foreach ($Policy in $OwaMailboxPolicies) {
     
     Show-ProgressBar -Status ('Fetching data for OWA Policy [{0}]' -f $Policy.Name) -PercentComplete 15 -Stage 1
@@ -1973,10 +2121,7 @@ function Get-OutlookWebAppPolicies {
 
   $Text = ('The Exchange Organization has {0} configured OWA mailbox policies.' -f ($OwaMailboxPolicyCount))
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
-
-    # write policy overview to document
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
 
@@ -1989,7 +2134,7 @@ function Get-OutlookWebAppPolicies {
     -Headers 'Policy Name','IsDefault', 'Assigned Users' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 200
     $Table.Columns.Item(2).Width = 80
@@ -2002,32 +2147,32 @@ function Get-OutlookWebAppPolicies {
 
     Write-EmptyWordLine
 
-    # write policy details to Word document
+    if($IncludeDetails) { 
     
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
 
-    foreach ($Policy in $OwaMailboxPolicies) {
+      foreach ($Policy in $OwaMailboxPolicies) {
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $Policy
+        $ObjectInformation = Expand-Object -Object $Policy
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
-      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-      Select-WordEndOfDocument
+        Select-WordEndOfDocument
 
-      $Table = $Null
+        $Table = $Null
 
-      Write-EmptyWordLine 
+        Write-EmptyWordLine 
+
+      }
     }
   }
 }
@@ -2036,7 +2181,6 @@ Function Get-ComplianceInformation {
 
   Show-ProgressBar -Status 'Compliance Information' -PercentComplete 15 -Stage 1
 
-  # Fetch DLP Policies
   $DlpPolicies = Get-DlpPolicy
 
   $DlpPolicyCount = ($DlpPolicies | Measure-Object).Count
@@ -2058,15 +2202,12 @@ function Get-RetentionPolicyInformation {
 
   Show-ProgressBar -Status 'Compliance Management - Get Retention Policy Information' -PercentComplete 15 -Stage 1
 
-  # Fetch 
   $RetentionPolicies = Get-RetentionPolicy | Sort-Object Id
 
   $Count = ($RetentionPolicies | Measure-Object).Count
 
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # fill hash table
   foreach($Policy in $RetentionPolicies) { 
 
     $Tags = $Policy.RetentionPolicyTagLinks.Name -join ', '
@@ -2082,7 +2223,6 @@ function Get-RetentionPolicyInformation {
 
   $Text = ('The Exchange Organization contains {0} retention policies.' -f $Count)
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
@@ -2096,7 +2236,7 @@ function Get-RetentionPolicyInformation {
     -Headers 'Name','Retention Policy Tags', 'IsDefault' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 180
     $Table.Columns.Item(2).Width = 200
@@ -2116,15 +2256,12 @@ function Get-RetentionPolicyTagInformation {
 
   Show-ProgressBar -Status 'Compliance Management - Get Retention Policy Tags' -PercentComplete 15 -Stage 1
 
-  # Fetch retnetion policy tags
   $Object = Get-RetentionPolicyTag | Sort-Object Name
 
   $Count = ($Object | Measure-Object).Count
 
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # fill hash table
   foreach($PolicyTag in $Object) { 
     $ObjectInformation += @{ 
       Name = $PolicyTag.Name; 
@@ -2137,7 +2274,6 @@ function Get-RetentionPolicyTagInformation {
 
   $Text = ('The Exchange Organization contains {0} rention policy tags.' -f $Count)
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
@@ -2153,7 +2289,7 @@ function Get-RetentionPolicyTagInformation {
       -Headers 'Name','Type', 'Retention Period' `
       -AutoFit $wdAutoFitFixed
 
-      Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+      Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
       $Table.Columns.Item(1).Width = 180
       $Table.Columns.Item(2).Width = 150
@@ -2167,33 +2303,33 @@ function Get-RetentionPolicyTagInformation {
 
       Write-EmptyWordLine
 
-      # write policy details to Word document
-      if($Count -ne 0) { 
+      if($IncludeDetails) { 
+
+        if($Count -ne 0) { 
     
-        Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+          Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
 
-        foreach ($Policy in $Object) {
+          foreach ($Policy in $Object) {
 
-          Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
+            Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Identity)
 
-          # store policy details in hash table
-          $ObjectInformation = Expand-Object -Object $Policy
+            $ObjectInformation = Expand-Object -Object $Policy
 
-          $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+            $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-          # set font to 8pt
-          Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-          Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+            Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+            Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-          $Table.Columns.Item(1).Width = 180
-          $Table.Columns.Item(2).Width = 300
-          $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+            $Table.Columns.Item(1).Width = 180
+            $Table.Columns.Item(2).Width = 300
+            $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-          Select-WordEndOfDocument
+            Select-WordEndOfDocument
 
-          $Table = $Null
+            $Table = $Null
 
-          Write-EmptyWordLine 
+            Write-EmptyWordLine 
+          }
         }
       }
     }
@@ -2204,21 +2340,17 @@ function Get-JournalingInformation {
 
   Show-ProgressBar -Status 'Compliance Management - Get Journaling Rules' -PercentComplete 15 -Stage 1
 
-  # Fetch 
   $Object = Get-JournalRule | Sort-Object Name 
 
   $Count = $($Object | Measure-Object).Count
 
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
-  # fill hash table
-  $ObjectInformation += @{ Data = "Mailboxes"; Value = $SomeCount; }
+  $ObjectInformation += @{ Data = "Mailboxes"; Value = $Count; }
 
-  $SectionTitle = 'Jornal Rules'
+  $SectionTitle = 'Journal Rules'
   $Text = ('The Exchange Organization contains {0} journal rules.' -f $Count)
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
@@ -2249,7 +2381,6 @@ function Get-MobileDeviceInformation {
 
   Show-ProgressBar -Status 'Get Mobile Device Information' -PercentComplete 15 -Stage 1
 
-  # Fetch all mobile devices
   $MobileDevices = Get-MobileDevice -Resultsize Unlimited 
 
   $MobileDeviceCount = ($MobileDevices | Measure-Object).Count
@@ -2259,10 +2390,8 @@ function Get-MobileDeviceInformation {
   $MobileDeviceDeviceDiscoveryCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'DeviceDiscovery'}) | Measure-Object).Count
   $MobileDeviceUnknownCount = (($MobileDevices| Where-Object{$_.DeviceAccessState -eq 'Unknown'}) | Measure-Object).Count
 
-  # Hash table
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
   
-  # MObile device states
   $ObjectInformation += @{ Data = "Mobile Devices"; Value = $MobileDeviceCount; }
   $ObjectInformation += @{ Data = "Activated Mobile Devices"; Value = $MobileDeviceAvtivatedCount; }
   $ObjectInformation += @{ Data = "Quarantined Mobile Devices"; Value = $MobileDeviceQuarantinedCount; }
@@ -2270,9 +2399,8 @@ function Get-MobileDeviceInformation {
   $ObjectInformation += @{ Data = "Device Discovery Mobile Devices"; Value = $MobileDeviceDeviceDiscoveryCount; }
   $ObjectInformation += @{ Data = "Unknown Mobile Devices"; Value = $MobileDeviceUnknownCount; }
 
-  # Hash table for mobile device type/model overview
-  [System.Collections.Hashtable[]]$MobileDeviceTypeTableRowHash = @()
-  [System.Collections.Hashtable[]]$MobileDeviceModelTableRowHash = @()
+  [Collections.Hashtable[]]$MobileDeviceTypeTableRowHash = @()
+  [Collections.Hashtable[]]$MobileDeviceModelTableRowHash = @()
 
   $MobileDeviceTypes = $MobileDevices | Group-Object DeviceType | Sort-Object Name
   $MobileDeviceModels = $MobileDevices | Group-Object DeviceModel | Sort-Object Name
@@ -2293,19 +2421,13 @@ function Get-MobileDeviceInformation {
     }
   }
 
-  $SectionTitle = 'Mobile'
+  $SectionTitle = 'Mobile Devices'
 
   $Text = ''
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
-
-    # Insert page break
-    $Script:Selection.InsertNewPage()
-    
-    Write-WordLine -Style 1 -Tabs 0 -Name $SectionTitle
    
-    Write-WordLine -Style 3 -Tabs 0 -Name 'Mobile Devices'
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
 
     Write-EmptyWordLine
 
@@ -2321,7 +2443,6 @@ function Get-MobileDeviceInformation {
 
     $Table = $Null
 
-    # Mobile Device Types
     Write-EmptyWordLine
     Write-WordLine -Style 0 -Tabs 0 -Name 'Mobile Device Types'
 
@@ -2340,7 +2461,6 @@ function Get-MobileDeviceInformation {
 
     $Table = $Null
 
-    # Mobile Device Models
     Write-EmptyWordLine
     Write-WordLine -Style 0 -Tabs 0 -Name 'Mobile Device Models'
 
@@ -2349,7 +2469,7 @@ function Get-MobileDeviceInformation {
     -Headers 'Device Type','Device Count' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 200
     $Table.Columns.Item(2).Width = 80
@@ -2368,20 +2488,16 @@ function Get-MobileDevicePolicies {
 
   Show-ProgressBar -Status 'Get Mobile Device Mailbox Policies' -PercentComplete 15 -Stage 1
 
-  # Fetch all user mailboxes
   $MobileDeviceMailboxPolicies = Get-MobileDeviceMailboxPolicy | Sort-Object Name
 
   $PolicyCount = ($MobileDeviceMailboxPolicies | Measure-Object).Count
 
-  # Hash table for mobile device policyoverview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # Hash table for mobile device policy details
-  [System.Collections.Hashtable[]]$ObjectInformation = @()
+  [Collections.Hashtable[]]$ObjectInformation = @()
 
   $CASMailboxes = Get-CASMailbox -ResultSize Unlimited
 
-  # process each policy
   foreach ($Policy in $MobileDeviceMailboxPolicies) {
     
     Show-ProgressBar -Status ('Fetching data for Mobile Device Policy [{0}]' -f $Policy.Name) -PercentComplete 15 -Stage 1
@@ -2393,17 +2509,13 @@ function Get-MobileDevicePolicies {
       IsDefault = $Policy.IsDefault;
       AssignedUsers = $MailboxCount;
     }
-
   }
 
   $SectionTitle = 'Mobile Device Policies'
 
   $Text = "The Exchange Organization has $($PolicyCount) mobile device policies."
 
-  # Write to Word
   if($ExportTo -eq 'MSWord') {
-
-    # write policy overview to document
 
     Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
 
@@ -2416,7 +2528,7 @@ function Get-MobileDevicePolicies {
     -Headers 'Policy Name','IsDefault', 'Assigned User Mailboxes' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 200
     $Table.Columns.Item(2).Width = 80
@@ -2429,34 +2541,32 @@ function Get-MobileDevicePolicies {
 
     Write-EmptyWordLine
 
-    # write policy details to Word document
-  
+    if($IncludeDetails) { 
+        
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
     
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
-    
-    foreach ($Policy in $MobileDeviceMailboxPolicies) {
+      foreach ($Policy in $MobileDeviceMailboxPolicies) {
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $Policy
+        $ObjectInformation = Expand-Object -Object $Policy
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
-      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-      Select-WordEndOfDocument
+        Select-WordEndOfDocument
 
-      $Table = $Null
+        $Table = $Null
 
-      Write-EmptyWordLine 
+        Write-EmptyWordLine 
      
+      }
     }
   }
 }
@@ -2466,15 +2576,12 @@ function Get-SharingInformation {
 
   Show-ProgressBar -Status 'Organization Information - Sharing' -PercentComplete 15 -Stage 1
 
-  # Fetch Sharing Policies
   $Policies = Get-SharingPolicy | Sort-Object Name
 
   $PolicyCount = ($Policies | Measure-Object).Count
 
-  # Hash table for sharing policy overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # process each policy
   foreach ($Policy in $Policies) {
   
     $WordTableRowHash += @{ 
@@ -2504,7 +2611,7 @@ function Get-SharingInformation {
     -Headers 'Policy Name', 'Domains', 'Default', 'Enabled' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 150
     $Table.Columns.Item(2).Width = 150
@@ -2526,15 +2633,12 @@ function Get-AppInformation {
 
   Show-ProgressBar -Status 'Organization Information - Apps' -PercentComplete 15 -Stage 1
 
-  # Fetch Sharing Policies
   $Apps = Get-App -OrganizationApp:$true | Sort-Object DisplayName
 
   $AppCount = ($Apps| Measure-Object).Count
 
-  # Hash table for apps overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # process each app
   foreach ($App in $Apps) {
   
     $WordTableRowHash += @{ 
@@ -2566,7 +2670,7 @@ function Get-AppInformation {
     -Headers 'Display Name', 'Provider Name', 'Provided To', 'Enabled', 'Default State For User' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 130
     $Table.Columns.Item(2).Width = 130
@@ -2589,15 +2693,12 @@ function Get-AddressListInformation {
 
   Show-ProgressBar -Status 'Organization Information - Address Lists' -PercentComplete 15 -Stage 1
 
-  # Fetch address lists
   $AddressLists = Get-AddressList | Sort-Object Name
 
   $AddressListCount = ($AddressLists| Measure-Object).Count
 
-  # Hash table for address list overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # process each address list
   foreach ($AddressList in $AddressLists) {
   
     $WordTableRowHash += @{ 
@@ -2627,7 +2728,7 @@ function Get-AddressListInformation {
     -Headers 'Name', 'Display Name', 'Recipient Filter' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 130
     $Table.Columns.Item(2).Width = 130
@@ -2642,31 +2743,34 @@ function Get-AddressListInformation {
 
     Write-EmptyWordLine
 
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Address List Details'
+    if($IncludeDetails) { 
+
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Address List Details'
     
-    foreach ($AddressList in $AddressLists) {
+      foreach ($AddressList in $AddressLists) {
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $AddressList.Name)
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $AddressList.Name)
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $AddressList
+        # store policy details in hash table
+        $ObjectInformation = Expand-Object -Object $AddressList
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        # set font to 8pt
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
-      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-      Select-WordEndOfDocument
+        Select-WordEndOfDocument
 
-      $Table = $Null
+        $Table = $Null
 
-      Write-EmptyWordLine 
+        Write-EmptyWordLine 
      
+      }
     }
   }
 }
@@ -2675,15 +2779,12 @@ function Get-MalwareInformation {
 
   Show-ProgressBar -Status 'Protection - Malware' -PercentComplete 15 -Stage 1
 
-  # Fetch malware policies
   $MalwarePolicies = Get-MalwareFilterPolicy | Sort-Object Name
 
   $MalwarePolicyCount = ($MalwarePolicies| Measure-Object).Count
 
-  # Hash table for malware policy overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # process each malware policy
   foreach ($Policy in $MalwarePolicies) {
   
     $WordTableRowHash += @{ 
@@ -2714,7 +2815,7 @@ function Get-MalwareInformation {
     -Headers 'Name', 'Action', 'Custom Notifications', 'IsDefault' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 130
     $Table.Columns.Item(2).Width = 130
@@ -2730,31 +2831,33 @@ function Get-MalwareInformation {
 
     Write-EmptyWordLine
 
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Malware Policy Details'
+    if($IncludeDetails) { 
 
-    foreach ($Policy in $MalwarePolicies) {
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Malware Policy Details'
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
+      foreach ($Policy in $MalwarePolicies) {
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $Policy
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $ObjectInformation = Expand-Object -Object $Policy
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
-      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
 
-      Select-WordEndOfDocument
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
-      $Table = $Null
+        Select-WordEndOfDocument
 
-      Write-EmptyWordLine 
+        $Table = $Null
+
+        Write-EmptyWordLine 
      
+      }
+
     }
   }
 }
@@ -2763,15 +2866,12 @@ function Get-TransportRuleInformation {
 
   Show-ProgressBar -Status 'Mail Flow - Transport Rules' -PercentComplete 15 -Stage 1
 
-  # Fetch malware policies
   $TransportRules = Get-TransportRule | Sort-Object Priority
 
   $TransportRuleCount = ($TransportRules| Measure-Object).Count
 
-  # Hash table for malware policy overview
-  [System.Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
 
-  # process each malware policy
   foreach ($Rule in $TransportRules) {
   
     $WordTableRowHash += @{ 
@@ -2803,7 +2903,7 @@ function Get-TransportRuleInformation {
     -Headers 'Name', 'Priority', 'State', 'Mode', 'Comments' `
     -AutoFit $wdAutoFitFixed
 
-    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15;
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
 
     $Table.Columns.Item(1).Width = 140
     $Table.Columns.Item(2).Width = 50
@@ -2820,48 +2920,940 @@ function Get-TransportRuleInformation {
 
     Write-EmptyWordLine
 
-    Write-WordLine -Style 4 -Tabs 0 -Name 'Transport Rule Details'
+    if($IncludeDetails) { 
 
-    foreach ($Rule in $TransportRules) {
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Transport Rule Details'
 
-      Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Rule.Name)
+      foreach ($Rule in $TransportRules) {
 
-      # store policy details in hash table
-      $ObjectInformation = Expand-Object -Object $Rule
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Rule.Name)
 
-      $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+        $ObjectInformation = Expand-Object -Object $Rule
 
-      # set font to 8pt
-      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
-      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
-      $Table.Columns.Item(1).Width = 180
-      $Table.Columns.Item(2).Width = 300
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+        Select-WordEndOfDocument
+
+        $Table = $Null
+
+        Write-EmptyWordLine 
+     
+      }
+
+    }
+  }
+}
+
+function Get-EmailAddressPolicyInformation {
+
+  Show-ProgressBar -Status 'Mail Flow - Email Address Policies' -PercentComplete 15 -Stage 1
+
+  $EmailAddressPolicies = Get-EmailAddressPolicy | Sort-Object Priority
+
+  $ObjectCount = ($EmailAddressPolicies | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($Policy in $EmailAddressPolicies) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Policy.Name; 
+      Priority = $Policy.Priority; 
+      RecipientFilter = $Policy.RecipientFilter; 
+      RecipientFilterApplied = $Policy.RecipientFilterApplied;
+    }
+  }
+
+  $SectionTitle = 'Email Address Policy'
+
+  $PolicyText = 'policies'
+  if($ObjectCount-eq 1) {$PolicyText = 'policy'}
+
+  $Text = ('The Exchange Organization contains {0} email address {1}.' -f $ObjectCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, Priority, RecipientFilter, RecipientFilterApplied `
+    -Headers 'Name', 'Priority', 'Recipient Filter', 'Recipient Filter Applied' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 140
+    $Table.Columns.Item(2).Width = 50
+    $Table.Columns.Item(3).Width = 200
+    $Table.Columns.Item(4).Width = 50
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+    
+    if($IncludeDetails) { 
+
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Email Address Policy Details'
+
+      foreach ($Policy in $EmailAddressPolicies) {
+
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Policy.Name)
+
+        $ObjectInformation = Expand-Object -Object $Policy
+
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+        Select-WordEndOfDocument
+
+        $Table = $Null
+
+        Write-EmptyWordLine 
+     
+      }
+    }
+  }
+}
+
+function Get-ReceiveConnectorInformation {
+
+  Show-ProgressBar -Status 'Mail Flow - Receive Connectors' -PercentComplete 15 -Stage 1
+
+  $ReceiveConnectors = Get-ReceiveConnector | Sort-Object Server,Name
+
+  $ObjectCount = ($ReceiveConnectors | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($Connector in $ReceiveConnectors) {
+  
+    $WordTableRowHash += @{ 
+      Server = $Connector.Server; 
+      Name = $Connector.Name; 
+      Bindings = ($Connector.Bindings -join ', '); 
+      Enabled = $Connector.Enabled; 
+    }
+  }
+
+  $SectionTitle = 'Receive Connector'
+
+  $PolicyText = 'connectors'
+  if($ObjectCount-eq 1) {$PolicyText = 'connector'}
+
+  $Text = ('The Exchange Organization contains {0} receive {1} .' -f $ObjectCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Server, Name, Bindings, Enabled `
+    -Headers 'Server', 'Name', 'Bindings', 'Enabled' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 80
+    $Table.Columns.Item(2).Width = 150
+    $Table.Columns.Item(3).Width = 150
+    $Table.Columns.Item(4).Width = 50
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    if($IncludeDetails) { 
+
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Receive Connector Details'
+
+      foreach ($Connector in $ReceiveConnectors) {
+
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Connector.Identity)
+
+        $ObjectInformation = Expand-Object -Object $Connector 
+
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+        Select-WordEndOfDocument
+
+        $Table = $Null
+
+        Write-EmptyWordLine 
+     
+      }
+    }
+  }
+}
+
+function Get-SendConnectorInformation {
+
+  Show-ProgressBar -Status 'Mail Flow - Send Connectors' -PercentComplete 15 -Stage 1
+
+  $SendConnectors = Get-SendConnector | Sort-Object Name
+
+  $ObjectCount = ($SendConnectors | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($Connector in $SendConnectors) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Connector.Name; 
+      AddressSpaces = ($Connector.AddressSpaces -join ', '); 
+      SourceTransportServers = ($Connector.SourceTransportServers -join ', ');
+      Enabled = $Connector.Enabled; 
+    }
+  }
+
+  $SectionTitle = 'Send Connector'
+
+  $PolicyText = 'connectors'
+  if($ObjectCount-eq 1) {$PolicyText = 'connector'}
+
+  $Text = ('The Exchange Organization contains {0} send {1} .' -f $ObjectCount, $PolicyText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, AddressSpaces, SourceTransportServers, Enabled `
+    -Headers 'Name', 'Address Spaces', 'Source Transport Servers', 'Enabled' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 120
+    $Table.Columns.Item(2).Width = 150
+    $Table.Columns.Item(3).Width = 150
+    $Table.Columns.Item(4).Width = 50
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    if($IncludeDetails) { 
+
+      Write-WordLine -Style 4 -Tabs 0 -Name 'Send Connector Details'
+
+      foreach ($Connector in $SendConnectors) {
+
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $Connector.Identity)
+
+        $ObjectInformation = Expand-Object -Object $Connector 
+
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+        Select-WordEndOfDocument
+
+        $Table = $Null
+
+        Write-EmptyWordLine 
+     
+      }
+    }
+  }
+}
+
+function Get-PublicFolderInformation {
+
+  if($IncludePublicFolders) {
+
+    Show-ProgressBar -Status 'Public Folders - Public Folder Details (long running)' -PercentComplete 15 -Stage 1
+
+    # This code will run forvever so it's not enabled by default
+    # Get-PublicFolderStatistics -ResultSize Unlimited | Select-Object Name,DatabaseName,TotalItemSize | Measure-Object -Property TotalItemSize -Sum
+
+    $PublicFolderCount = ((Get-PublicFolder "\" -Recurse -ResultSize Unlimited) | Measure-Object).Count
+
+    $MailPublicFolders = Get-MailPublicFolder -ResultSize Unlimited
+    $MailPublicFolderCount = ($MailPublicFolders | Measure-Object).Count
+
+    $RootPublicFolders = Get-PublicFolder "\" -GetChildren
+    $RootPublicFolderCount = ($RootPublicFolders | Measure-Object).Count
+
+    [Collections.Hashtable[]]$PublicFolderInformation = @()
+  
+    $PublicFolderInformation += @{ Data = "Public Folders in Root"; Value = $RootPublicFolderCount; }
+    $PublicFolderInformation += @{ Data = "Public Folders"; Value = $PublicFolderCount; }
+    $PublicFolderInformation += @{ Data = "Mail enabled Public Folders"; Value = $MailPublicFolderCount; }
+
+    $Table = Add-WordTable -Hashtable $PublicFolderInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+    Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 
+
+    $Table.Columns.Item(1).Width = 180
+    $Table.Columns.Item(2).Width = 300
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+    
+    if($RootPublicFolderCount -gt 0) { 
+
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Root Public Folders'
+
+      [Collections.Hashtable[]]$WordTableRowHash = @()
+
+      foreach($PublicFolder in $RootPublicFolders) {
+
+        $WordTableRowHash += @{
+          Name = $PublicFolder.Name;
+          HasSubFolders = $PublicFolder.HasSubFolders;
+          ContentMailboxName = $PublicFolder.ContentMailboxName;
+        }
+      }
+
+      $Table = Add-WordTable -Hashtable $WordTableRowHash `
+      -Columns Name, HasSubFolders, ContentMailboxName `
+      -Headers 'Name', 'Has SubFolders', 'Content MailboxName' `
+      -AutoFit $wdAutoFitFixed
+
+      Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+      $Table.Columns.Item(1).Width = 150
+      $Table.Columns.Item(2).Width = 80
+      $Table.Columns.Item(3).Width = 150
+
       $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
       Select-WordEndOfDocument
 
       $Table = $Null
 
-      Write-EmptyWordLine 
-     
+      Write-EmptyWordLine
+    }
+    else {
+      Write-WordLine -Style 0 -Tabs 0 -Name "The public folder hierarchy is empty."
+    }
+
+    if($MailPublicFolderCount -gt 0) {
+
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Mail Public Folders'
+
+      [Collections.Hashtable[]]$WordTableRowHash = @()
+
+      foreach($PublicFolder in $MailPublicFolders) {
+
+        $WordTableRowHash += @{
+          DisplayName = $PublicFolder.DisplayName;
+          PrimarySmtpAddress = $PublicFolder.PrimarySmtpAddress;
+          EmailAddresses = $PublicFolder.EmailAddresses -join ', ';
+        }
+      }
+
+      $Table = Add-WordTable -Hashtable $WordTableRowHash `
+      -Columns DisplayName, PrimarySmtpAddress, EmailAddresses `
+      -Headers 'Display Name', 'Primary SmtpAddress', 'Email Addresses' `
+      -AutoFit $wdAutoFitFixed
+
+      Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+      Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Size $WordSmallFontSize
+      Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+      Set-WordCellFormat -Collection $Table.Columns.Item(3).Cells -Size $WordSmallFontSize
+
+      $Table.Columns.Item(1).Width = 120
+      $Table.Columns.Item(2).Width = 120
+      $Table.Columns.Item(3).Width = 190
+
+      $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+      Select-WordEndOfDocument
+
+      $Table = $Null
+
+      Write-EmptyWordLine
+      
+    }
+    else {
+      Write-WordLine -Style 0 -Tabs 0 -Name 'The public folder hierarchy does contain any mail enabled public folders.'
+    }
+  }
+  else {
+    $Text = 'This document does not include detailed information about the public folder hierarchy. To include detailed information run the script using the -IncludePublicFolders switch.'
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+  }
+}
+
+function Get-PublicFolderMailboxInformation {
+
+  Show-ProgressBar -Status 'Public Folder - Public Folder Mailboxes' -PercentComplete 15 -Stage 1
+
+  $PublicFolderMailboxes = Get-Mailbox -PublicFolder -ResultSize Unlimited | Sort-Object
+
+  $ObjectCount = ($PublicFolderMailboxes | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($Mailbox in $PublicFolderMailboxes) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Mailbox.Name; 
+      IsRootPublicFolderMailbox = $Mailbox.IsRootPublicFolderMailbox;
+      IsExcludedFromServingHierarchy = $Mailbox.IsExcludedFromServingHierarchy;
+      Database = $Mailbox.Database; 
+    }
+  }
+
+  $SectionTitle = 'Public Folder Mailboxes'
+
+  if($ObjectCount -eq 0) {
+    $Text = 'The Exchange Organization has no public folder mailboxes.'
+  }
+  else { 
+
+    $ObjectText = 'mailboxes'
+    if($ObjectCount-eq 1) {$ObjectText = 'mailbox'}
+
+    $Text = ('The Exchange Organization contains {0} public folder {1} .' -f $ObjectCount, $ObjectText)
+  }
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, IsRootPublicFolderMailbox, IsExcludedFromServingHierarchy, Database `
+    -Headers 'Name', 'Primary Hierarchy', 'Excluded From Serving Hierarchy', 'Database' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 100
+    $Table.Columns.Item(2).Width = 80
+    $Table.Columns.Item(3).Width = 80
+    $Table.Columns.Item(4).Width = 100
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+  }
+}
+
+function Get-UMDialPlanInformation {
+
+  Show-ProgressBar -Status 'Unified Messaging - Dial Plans' -PercentComplete 15 -Stage 1
+
+  $DialPlans = Get-UMDialPlan
+
+  $ObjectCount = ($DialPlans | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($DialPlan in $DialPlans) {
+  
+    $WordTableRowHash += @{ 
+      Name = $DialPlan.Name; 
+      AddressSpaces = ($DialPlan.AddressSpaces -join ', '); 
+      SourceTransportServers = ($DialPlan.SourceTransportServers -join ', ');
+      Enabled = $DialPlan.Enabled; 
+    }
+  }
+
+  $SectionTitle = 'Dial Plans'
+
+  if($ObjectCount -eq 0) {
+    $text = 'The Exchange Organization contains no dial plans.'
+  }
+  else {
+    $PolicyText = 'plans'
+    if($ObjectCount-eq 1) {$PolicyText = 'plan'}
+
+    $Text = ('The Exchange Organization contains {0} dial {1} .' -f $ObjectCount, $PolicyText)
+
+  }
+
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+
+    if($ObjectCount -ne 0) { 
+
+      <#
+    
+          $Table = Add-WordTable -Hashtable $WordTableRowHash `
+          -Columns Name, AddressSpaces, SourceTransportServers, Enabled `
+          -Headers 'Name', 'Address Spaces', 'Source Transport Servers', 'Enabled' `
+          -AutoFit $wdAutoFitFixed
+
+          Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+          $Table.Columns.Item(1).Width = 120
+          $Table.Columns.Item(2).Width = 150
+          $Table.Columns.Item(3).Width = 150
+          $Table.Columns.Item(4).Width = 50
+
+          $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+          Select-WordEndOfDocument
+
+          $Table = $Null
+
+          Write-EmptyWordLine
+
+      #>
     }
   }
 }
 
-function Set-SectionTitle {
-  param (
-    [string]$SectionTitle = '',
-    [int]$Style = 3,
-    [switch]$NewPage
+function Get-DiskSpace {
+  param(
+    [string]$ServerName
   )
+    
+  $wmiObject = Get-WmiObject -Class Win32_Volume -ComputerName $ServerName | Select-Object Name, Capacity, FreeSpace, BootVolume, SystemVolume, FileSystem | Sort-Object -Property Name 
 
-  if($NewPage) {
-    # Insert page break
-    $Script:Selection.InsertNewPage()
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach($Drive in $wmiObject) {
+
+    $WordTableRowHash += @{
+      Name =$Drive.Name;
+      Capacity = [decimal]::round($Drive.Capacity/1GB);
+      FreeDiskSpace = [decimal]::round($Drive.FreeSpace/1GB);
+      BootVolume = $Drive.BootVolume;
+      SystemVolume = $Drive.SystemVolume;
+      FileSystem = $Drive.FileSystem;
+    }
   }
 
-  Write-WordLine -Style $Style -Tabs 0 -Name $SectionTitle
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 5 -Tabs 0 -Name 'Disk Volumes'
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, Capacity, FreeDiskSpace, BootVolume, SystemVolume,FileSystem `
+    -Headers 'Name', 'Capacity (GB)', 'Free (GB)', 'Boot Volume', 'System Volume', 'File System' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 130
+    $Table.Columns.Item(2).Width = 70
+    $Table.Columns.Item(3).Width = 70
+    $Table.Columns.Item(4).Width = 60
+    $Table.Columns.Item(5).Width = 60
+    $Table.Columns.Item(6).Width = 60
+
+    # set font to 8pt
+    Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Size $WordSmallFontSize
+    Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+    Set-WordCellFormat -Collection $Table.Columns.Item(3).Cells -Size $WordSmallFontSize
+    Set-WordCellFormat -Collection $Table.Columns.Item(4).Cells -Size $WordSmallFontSize
+    Set-WordCellFormat -Collection $Table.Columns.Item(5).Cells -Size $WordSmallFontSize
+    Set-WordCellFormat -Collection $Table.Columns.Item(6).Cells -Size $WordSmallFontSize
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+  }
+}
+
+Function Get-OperatingSystemVersion {
+  param(
+    [Parameter(Mandatory=$true)][string]$OSVersion
+  )
+    
+    switch($OSVersion) {
+        "6.0.6000" {return [OrgReport.OSVersionName]::Windows2008}
+        "6.1.7600" {return [OrgReport.OSVersionName]::Windows2008R2}
+        "6.1.7601" {return [OrgReport.OSVersionName]::Windows2008R2}
+        "6.2.9200" {return [OrgReport.OSVersionName]::Windows2012}
+        "6.3.9600" {return [OrgReport.OSVersionName]::Windows2012R2}
+        "10.0.14393" {return [OrgReport.OSVersionName]::Windows2016}
+        "10.0.17713" {return [OrgReport.OSVersionName]::Windows2019}
+        default{return [OrgReport.OSVersionName]::Unknown}
+    }
+}
+
+
+
+function Get-NetworkInformation {
+  param(
+    [Parameter(Mandatory)][string]$ServerName
+  )
+
+}
+
+function Get-OperatingSystemInformation {
+  param(
+    [Parameter(Mandatory)][string]$ServerName
+  )
+
+  [OrgReport.OperatingSystemObject]$OperatingSystem = New-Object -TypeName OrgReport.OperatingSystemObject
+  $WmiOS = Get-WmiObject -ComputerName $ServerName -Class Win32_OperatingSystem
+
+  $OperatingSystem.OSVersionBuild = $WmiOS.Version
+  $OperatingSystem.OSVersion = Get-OperatingSystemVersion -OSVersion $OperatingSystem.OSVersionBuild
+  $OperatingSystem.OSName = $WmiOS.Caption
+  $OperatingSystem.OperatingSystem = $OperatingSystem
+
+  $CurrentDateTime = Get-Date
+  $ServerUptime = [Management.ManagementDateTimeConverter]::ToDateTime($WmiOS.LastBootUpTime)
+
+  $OperatingSystem.BootUpTimeInDays = ($CurrentDateTime - $ServerUptime).Days
+  $OperatingSystem.BootUpTimeInHours = ($CurrentDateTime - $ServerUptime).Hours
+  $OperatingSystem.BootUpTimeInMinutes = ($CurrentDateTime - $ServerUptime).Minutes
+  $OperatingSystem.BootUpTimeInSeconds = ($CurrentDateTime - $ServerUptime).Seconds
+
+  if($env:COMPUTERNAME -eq $ServerName) {
+    $OperatingSystem.TimeZone = ([System.TimeZoneInfo]::Local).StandardName
+  }
+  else {
+    $OperatingSystem.TimeZone = Invoke-Command -ComputerName $ServerName -ScriptBlock {([System.TimeZoneInfo]::Local).StandardName}
+  }
+
+  return $OperatingSystem
+}
+
+function Write-ServerDetails {
+  param(
+    [Parameter(Mandatory)][OrgReport.ExchangeServerObject]$ServerObject
+  )
+
+  [Collections.Hashtable[]]$ObjectInformation = @()
+
+  $ObjectInformation += @{ Data = 'Operating System'; Value = $ServerObject.OperatingSystem.OSName; }
+  $ObjectInformation += @{ Data = 'Operating Version'; Value = $ServerObject.OperatingSystem.OSVersionBuild; }
+  $ObjectInformation += @{ Data = 'Up Time'; Value = ("{0} day(s), {1} hour(s), {2} minute(s), {3} second(s)" -f $ServerObject.OperatingSystem.BootUpTimeInDays,$ServerObject.OperatingSystem.BootUpTimeInHours, $ServerObject.OperatingSystem.BootUpTimeInMinutes, $ServerObject.OperatingSystem.BootUpTimeInSeconds ) }
+  $ObjectInformation += @{ Data = 'Time Zone'; Value = $ServerObject.OperatingSystem.TimeZone; }
+
+  if($ExportTo -eq 'MSWord') { 
+
+    $Table = Add-WordTable -Hashtable $ObjectInformation `
+				-Columns Data,Value `
+				-List `
+				-Format $wdTableGrid `
+				-AutoFit $wdAutoFitFixed
+
+		Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+		$Table.Columns.Item(1).Width = 175
+		$Table.Columns.Item(2).Width = 300
+
+		$Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+		Select-WordEndOfDocument
+
+		$Table = $Null
+
+    Write-EmptyWordLine
+  }
+}
+
+function Get-ServerDetails {
+  param(
+    [Parameter(Mandatory)][Microsoft.Exchange.Data.Directory.Management.ExchangeServer]$ExchangeServer,
+    [switch]$IsEdgeServer
+  )
+
+  [OrgReport.ExchangeServerObject]$ServerObject = New-Object -TypeName OrgReport.ExchangeServerObject
+  $ServerObject.Name = $ExchangeServer.Name
+  $ServerObject.OperatingSystem = Get-OperatingSystemInformation -ServerName $ExchangeServer.Name
+
+  Write-ServerDetails -ServerObject $ServerObject
+
+  Get-DiskSpace -ServerName $ExchangeServer.Name
+}
+
+
+function Get-ExchangeServerInformation {
+
+  Show-ProgressBar -Status 'Servers - Servers' -PercentComplete 15 -Stage 1
+
+  $ExchangeServers = Get-ExchangeServer | Sort-Object Name
+
+  $ObjectCount = ($ExchangeServers | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach ($Server in $ExchangeServers) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Server.Name; 
+      ServerRole = $Server.ServerRole; 
+      Edition = $Server.Edition;
+      Version = ('{0}.{1}.{2}' -f $Server.AdminDisplayVersion.Major, $Server.AdminDisplayVersion.Minor, $Server.AdminDisplayVersion.Build)
+    }
+  }
+
+  $SectionTitle = 'Exchange Servers'
+
+  $ObjectText = 'servers'
+
+  if($ObjectCount-eq 1) {$ObjectText = 'server'}
+
+  $Text = ('The Exchange Organization contains {0} Exchange {1} .' -f $ObjectCount, $ObjectText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, ServerRole, Edition `
+    -Headers 'Name', 'Server Role', 'Edition' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 100
+    $Table.Columns.Item(2).Width = 80
+    $Table.Columns.Item(3).Width = 80
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    # process each server
+    foreach($Server in $ExchangeServers) {
+
+      Write-WordLine -Style 4 -Tabs 0 -Name $Server.Name
+
+      if($Server.ServerRole -contains 'Edge') {
+        Get-ServerDetails -ExchangeServer $Server -IsEdgeServer
+      }
+      else {
+        Get-ServerDetails -ExchangeServer $Server
+      }
+      
+      Write-EmptyWordLine
+
+    }
+  }
+
+}
+
+function Get-DatabaseInformation {
+
+  Show-ProgressBar -Status 'Servers - Databases' -PercentComplete 15 -Stage 1
+
+  $Databases = Get-MailboxDatabase -Status | Sort-Object -Property Name
+
+  $ObjectCount = ($Databases | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+  
+  $CultureInfo = ([System.Globalization.CultureInfo]::GetCultureInfo(1031))
+
+  foreach ($Database in $Databases) {
+  
+    $WordTableRowHash += @{ 
+      Name = $Database.Name;
+      ActiveServer = $Database.Server.Name;
+      Mounted = $Database.Mounted;
+      Copies = ($Database.AllDatabaseCopies | Select HOstServerName | Sort-Object).HostServerName -join ', '
+      Size = ($Database.DatabaseSize.ToBytes() / 1GB).ToString('N0', $CultureInfo)
+    }
+  }
+
+  $SectionTitle = 'Databases'
+
+  $ObjectText = 'databases'
+
+  if($ObjectCount-eq 1) {$ObjectText = 'database'}
+
+  $Text = ('The Exchange Organization contains {0} mailbox {1} .' -f $ObjectCount, $ObjectText)
+
+  if($ExportTo -eq 'MSWord') {
+
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+    
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, ActiveServer, Mounted, Size, Copies `
+    -Headers 'Name', 'Active Server', 'Mounted', 'Size (GB)', 'Database Copies' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 80
+    $Table.Columns.Item(2).Width = 80
+    $Table.Columns.Item(3).Width = 80
+    $Table.Columns.Item(4).Width = 80
+    $Table.Columns.Item(5).Width = 150
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+  }
+}
+
+function Get-DatabaseAvailabilityGroupInformation {
+  Show-ProgressBar -Status 'Servers - Database Availability Groups' -PercentComplete 15 -Stage 1
+
+  $DAGs= Get-DatabaseAvailabilityGroup -Status | Sort-Object Name
+  $ObjectCount = ($DAGs | Measure-Object).Count
+
+  [Collections.Hashtable[]]$WordTableRowHash = @()
+
+  foreach($DAG in $DAGs) {
+     $WordTableRowHash += @{ 
+      Name = $DAG.Name;
+      Servers = (($DAG.Servers | Select Name | Sort-Object -Property Name).Name) -join ', ';
+    }
+  }  
+
+  $SectionTitle = 'Database Availability Groups'
+
+  $ObjectText = 'groups'
+  if($ObjectCount-eq 1) {$ObjectText = 'group'}
+  $Text = ('The Exchange Organization contains {0} database availability {1}.' -f $ObjectCount, $ObjectText)
+
+  if($ExportTo -eq 'MSWord') {
+    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text
+
+    Write-EmptyWordLine
+
+    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    -Columns Name, Servers `
+    -Headers 'Name', 'Member Servers' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 100
+    $Table.Columns.Item(2).Width = 150
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+
+    if($IncludeDetails) {
+
+      Write-WordLine -Style 4 -Tabs 0 -Name 'DAG Details'
+
+      foreach ($DAG in $DAGs) {
+
+        Write-WordLine -Style 0 -Tabs 0 -Name ('Policy: {0}' -f $DAG.Identity)
+
+        $ObjectInformation = Expand-Object -Object $DAG 
+
+        $Table = Add-WordTable -Hashtable $ObjectInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
+
+        Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Bold -BackgroundColor $wdColorGray15 -Size $WordSmallFontSize
+        Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
+
+        $Table.Columns.Item(1).Width = 180
+        $Table.Columns.Item(2).Width = 300
+        $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+        Select-WordEndOfDocument
+
+        $Table = $Null
+
+        Write-EmptyWordLine 
+     
+      }
+    }
+  }
+}
+
+function Output-IntroductionText {
+
+  if($IncludeIntroduction) {
+
+    Write-WordLine -Style 1 -Tabs 0 -Name 'Introduction'
+
+    $Text = 'Some introductory text...'
+
+    Write-WordLine -Style 0 -Tabs 0 -Name $Text 
+    
+  }
 
 }
 
@@ -2869,17 +3861,14 @@ function Get-WordDocumentationLinks {
 
   # todo add proper hyperlinks as table cell information to Word
 
-  # Hash table for documentation links
-  [System.Collections.Hashtable[]]$HashTableDocumentationLinks = @()
+  [Collections.Hashtable[]]$HashTableDocumentationLinks = @()
 
-  # add interesting Exchange links to the documentation
   $HashTableDocumentationLinks += @{Title='Link 1';Link = 'http://www.google.de'}
 
   $SectionTitle = 'Appendix'
 
   if($ExportTo -eq 'MSWord') {
 
-    # Insert page break
     $Script:Selection.InsertNewPage()
     
     Write-WordLine -Style 1 -Tabs 0 -Name $SectionTitle
@@ -2925,13 +3914,15 @@ $script:StartTime = Get-Date
 
 [string]$Script:CurrentOS = (Get-WmiObject -class Win32_OperatingSystem -EA 0).Caption
 
-# try and fix the issue with the $CompanyName variable
 $Script:CoName = $CompanyName
 Write-Verbose -Message "$(Get-Date): Company name (CoName) is $($Script:CoName)"
 
 #region Word variables
 
 if($ExportTo -eq 'MSWord') {
+
+  # Test, if we can write to Word
+  # Test-WordPrerequisites
   
   # default values
   [int]$WordDefaultFontSize = 11
@@ -3060,7 +4051,7 @@ $AbstractTitle = 'Microsoft Exchange Organization Report'
 $SubjectTitle = 'Active Directory Inventory Report'
 $UserName = $env:username
 
-If($ADForest -ne ''-and $ADDomain -ne '') {
+if($ADForest -ne ''-and $ADDomain -ne '') {
   $ADForest = $ADDomain
 }
 
@@ -3079,9 +4070,17 @@ else {
 
 Set-ADServerSettings -ViewEntireForest $true
 
+if($IncludePublicFolders) {
+  Write-Warning -Message 'You''ve selected to include public folders. This will effect the overall runtime of the script, depending on the size of the public folder hierarchy!'
+}
+
 switch ($ExportTo) {
   'MSWord' {
+
+    # Prepare a new Word document for our report
     New-MicrosoftWordDocument
+  
+    Output-IntroductionText
 
     # Fetch general Active Directory Information first
     Get-ActiveDirectoryInformation
@@ -3096,7 +4095,9 @@ switch ($ExportTo) {
 
     Get-AcceptedDomainInformation
 
-    Get-TransportConfigInformation
+    Get-DatabaseOverviewInformation
+
+    # Get-TransportConfigInformation
 
     # Permissions
 
@@ -3145,11 +4146,17 @@ switch ($ExportTo) {
     Get-TransportRuleInformation
     
     ## Accepted Domains (already covered)his step)
-    ## Email address policies
-    ## Receive Connectors
-    ## Send Connectors
+
+    Get-EmailAddressPolicyInformation
+
+    Get-ReceiveConnectorInformation
+
+    Get-SendConnectorInformation
+
 
     # Mobile Devices
+
+    Set-SectionTitle -Style 1 -SectionTitle 'Mobile' -NewPage
 
     Get-MobileDeviceInformation
 
@@ -3157,18 +4164,31 @@ switch ($ExportTo) {
 
     # Public Folders 
 
-    ## Public Folders
-    ## Public Folder Mailboxes
+    Set-SectionTitle -Style 1 -SectionTitle 'Public Folder' -NewPage
 
+    Get-PublicFolderInformation
+
+    Get-PublicFolderMailboxInformation
+
+    
     # Unified Messaging
 
-    ## UM dial plans
+    Set-SectionTitle -Style 1 -SectionTitle 'Unified Messaging' -NewPage
+
+    Get-UMDialPlanInformation
+
     ## UM IP Gateways
 
     # Servers
 
-    ## Servers
-    ## Databases
+    Set-SectionTitle -Style 1 -SectionTitle 'Servers' -NewPage
+
+    Get-ExchangeServerInformation
+
+    Get-DatabaseInformation
+
+    Get-DatabaseAvailabilityGroupInformation
+    
     ## DAGs
     ## Virtual Dirs
     ## Certificates
