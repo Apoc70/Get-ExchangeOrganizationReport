@@ -36,19 +36,9 @@
     
     Revision History 
     -------------------------------------------------------------------------------- 
-    1.0 | Initial community release 
+    0.9 | Initial community release 
 
-    .PARAMETER SendMail
-    Switch to send the zipped archive via email
-
-    .PARAMETER MailFrom
-    Sender email address
-
-    .PARAMETER MailTo
-    Recipient(s) email address(es)
-
-    .PARAMETER MailServer
-    FQDN of SMTP mail server to be used
+    .PARAMETER 
 
     .EXAMPLE 
 #>
@@ -78,7 +68,7 @@ param(
 $ScriptDir = Split-Path -Path $script:MyInvocation.MyCommand.Path
 $ScriptName = $MyInvocation.MyCommand.Name
 [Diagnostics.Stopwatch]$StopWatch =  [Diagnostics.Stopwatch]::StartNew()
-[string]$FileName = 'Exchange-Organization-Report'
+[string]$FileName = 'Exchange-Org-Report'
 
 # Save current error action preference to restore the setting when script finishes
 $SavedErrerActionPreference = $ErrorActionPreference
@@ -1616,7 +1606,7 @@ function Get-ExchangeOrganizationConfig {
     
     Write-WordLine -Style 0 -Tabs 0 -Name $Text 
     Write-EmptyWordLine
-    Write-WordLine -Style 3 -Tabs 0 -Name 'Exchange Organization Configuration' 
+    Write-WordLine -Style 2 -Tabs 0 -Name 'Exchange Organization Configuration' 
 
     $Table = Add-WordTable -Hashtable $PublicFolderInformation -Columns Data,Value -List -Format $wdTableGrid -AutoFit $wdAutoFitFixed 
 
@@ -1710,7 +1700,7 @@ function Get-RecipientInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-EmptyWordLine
 
@@ -1738,11 +1728,11 @@ function Get-AcceptedDomainInformation {
 
   $Domains = Get-AcceptedDomain | Sort-Object DomainName 
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach($Domain in $Domains) {
 
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       DomainName = $Domain.DomainName; 
       Name = $Domain.Name; 
       DomainType = $Domain.DomainType;
@@ -1755,12 +1745,12 @@ function Get-AcceptedDomainInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
 
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns DomainName, Name, DomainType, IsDefault `
     -Headers 'Domain Name','Name','Domain Type','Default' `
     -AutoFit $wdAutoFitFixed
@@ -1858,7 +1848,7 @@ function Get-TransportConfigInformation {
   
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
     #Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
@@ -1916,7 +1906,7 @@ function Get-DatabaseOverviewInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
@@ -1945,7 +1935,7 @@ function Get-AdminPermissionInformation {
 
   $RoleCount = ($RoleGroups | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach($RoleGroup in $RoleGroups) {
     
@@ -1966,7 +1956,7 @@ function Get-AdminPermissionInformation {
       $MembersString = 'None'
     }
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       RoleGroup = $RoleGroup.Name; 
       RoleGroupMembers = $MembersString; 
     } 
@@ -1978,13 +1968,13 @@ function Get-AdminPermissionInformation {
   # Write to Word
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name 'Admin Roles' 
+    Write-WordLine -Style 2 -Tabs 0 -Name 'Admin Roles' 
     
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
 
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns RoleGroup, RoleGroupMembers `
     -Headers 'Role Group Name','Role Group Members' `
     -AutoFit $wdAutoFitFixed
@@ -2012,7 +2002,7 @@ function Get-UserRoleAssignmentPolicies {
 
   $PolicyCount = ($RoleAssignmentPolicies | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   [Collections.Hashtable[]]$ObjectInformation = @()
 
@@ -2022,7 +2012,7 @@ function Get-UserRoleAssignmentPolicies {
 
     $MailboxCount = (Get-Mailbox -ResultSize Unlimited | Where-Object{$_.RoleAssignmentPolicy -eq $Policy.Name}).Count
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       PolicyName = $Policy.Name; 
       IsDefault = $Policy.IsDefault;
       AssignedUsers = $MailboxCount;
@@ -2036,13 +2026,13 @@ function Get-UserRoleAssignmentPolicies {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns PolicyName, IsDefault, AssignedUsers `
     -Headers 'Policy Name','IsDefault', 'Assigned Users' `
     -AutoFit $wdAutoFitFixed
@@ -2062,7 +2052,7 @@ function Get-UserRoleAssignmentPolicies {
 
     if($IncludeDetails) { 
     
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Policy Details'
 
       foreach ($Policy in $RoleAssignmentPolicies) {
 
@@ -2097,7 +2087,7 @@ function Get-OutlookWebAppPolicies {
 
   $OwaMailboxPolicyCount = ($OwaMailboxPolicies |Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   [Collections.Hashtable[]]$ObjectInformation = @()
 
@@ -2109,7 +2099,7 @@ function Get-OutlookWebAppPolicies {
 
     $MailboxCount = ($CASMailboxes | Where-Object{$_.OwaMailboxPolicy -eq $Policy.Name}).Count
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       PolicyName = $Policy.Name; 
       IsDefault = $Policy.IsDefault;
       AssignedUsers = $MailboxCount;
@@ -2123,13 +2113,13 @@ function Get-OutlookWebAppPolicies {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns PolicyName, IsDefault, AssignedUsers `
     -Headers 'Policy Name','IsDefault', 'Assigned Users' `
     -AutoFit $wdAutoFitFixed
@@ -2149,7 +2139,7 @@ function Get-OutlookWebAppPolicies {
 
     if($IncludeDetails) { 
     
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Policy Details'
 
       foreach ($Policy in $OwaMailboxPolicies) {
 
@@ -2189,7 +2179,7 @@ Function Get-ComplianceInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name 'Data Loss Prevention '
+    Write-WordLine -Style 2 -Tabs 0 -Name 'Data Loss Prevention '
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -2225,7 +2215,7 @@ function Get-RetentionPolicyInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -2276,7 +2266,7 @@ function Get-RetentionPolicyTagInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -2307,7 +2297,7 @@ function Get-RetentionPolicyTagInformation {
 
         if($Count -ne 0) { 
     
-          Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+          Write-WordLine -Style 3 -Tabs 0 -Name 'Policy Details'
 
           foreach ($Policy in $Object) {
 
@@ -2353,7 +2343,7 @@ function Get-JournalingInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -2427,7 +2417,7 @@ function Get-MobileDeviceInformation {
 
   if($ExportTo -eq 'MSWord') {
    
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-EmptyWordLine
 
@@ -2492,7 +2482,7 @@ function Get-MobileDevicePolicies {
 
   $PolicyCount = ($MobileDeviceMailboxPolicies | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   [Collections.Hashtable[]]$ObjectInformation = @()
 
@@ -2504,7 +2494,7 @@ function Get-MobileDevicePolicies {
 
     $MailboxCount = ($CASMailboxes | Where-Object{$_.ActiveSyncMailboxPolicy -eq $Policy.Name}).Count
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       PolicyName = $Policy.Name; 
       IsDefault = $Policy.IsDefault;
       AssignedUsers = $MailboxCount;
@@ -2517,13 +2507,13 @@ function Get-MobileDevicePolicies {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle 
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle 
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns PolicyName, IsDefault, AssignedUsers `
     -Headers 'Policy Name','IsDefault', 'Assigned User Mailboxes' `
     -AutoFit $wdAutoFitFixed
@@ -2543,7 +2533,7 @@ function Get-MobileDevicePolicies {
 
     if($IncludeDetails) { 
         
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Policy Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Policy Details'
     
       foreach ($Policy in $MobileDeviceMailboxPolicies) {
 
@@ -2580,11 +2570,11 @@ function Get-SharingInformation {
 
   $PolicyCount = ($Policies | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Policy in $Policies) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       PolicyName = $Policy.Name; 
       Domains = $Policy.Domains;
       Default = $Policy.Default;
@@ -2600,13 +2590,13 @@ function Get-SharingInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns PolicyName, Domains, Default, Enabled `
     -Headers 'Policy Name', 'Domains', 'Default', 'Enabled' `
     -AutoFit $wdAutoFitFixed
@@ -2637,11 +2627,11 @@ function Get-AppInformation {
 
   $AppCount = ($Apps| Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($App in $Apps) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       DisplayName = $App.DisplayName; 
       ProviderName = $App.ProviderName;
       ProvidedTo = $App.ProvidedTo;
@@ -2659,13 +2649,13 @@ function Get-AppInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns DisplayName, ProviderName, ProvidedTo, Enabled, DefaultStateForUser `
     -Headers 'Display Name', 'Provider Name', 'Provided To', 'Enabled', 'Default State For User' `
     -AutoFit $wdAutoFitFixed
@@ -2697,11 +2687,11 @@ function Get-AddressListInformation {
 
   $AddressListCount = ($AddressLists| Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($AddressList in $AddressLists) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $AddressList.Name; 
       DisplayName = $AddressList.DisplayName; 
       RecipientFilter = $AddressList.RecipientFilter; 
@@ -2717,13 +2707,13 @@ function Get-AddressListInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, DisplayName, RecipientFilter `
     -Headers 'Name', 'Display Name', 'Recipient Filter' `
     -AutoFit $wdAutoFitFixed
@@ -2745,7 +2735,7 @@ function Get-AddressListInformation {
 
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Address List Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Address List Details'
     
       foreach ($AddressList in $AddressLists) {
 
@@ -2783,11 +2773,11 @@ function Get-MalwareInformation {
 
   $MalwarePolicyCount = ($MalwarePolicies| Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Policy in $MalwarePolicies) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Policy.Name; 
       Action = $Policy.Action; 
       CustomNotifications = $Policy.CustomNotifications; 
@@ -2804,13 +2794,13 @@ function Get-MalwareInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, Action, CustomNotifications, IsDefault `
     -Headers 'Name', 'Action', 'Custom Notifications', 'IsDefault' `
     -AutoFit $wdAutoFitFixed
@@ -2833,7 +2823,7 @@ function Get-MalwareInformation {
 
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Malware Policy Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Malware Policy Details'
 
       foreach ($Policy in $MalwarePolicies) {
 
@@ -2870,11 +2860,11 @@ function Get-TransportRuleInformation {
 
   $TransportRuleCount = ($TransportRules| Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Rule in $TransportRules) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Rule.Name; 
       Priority = $Rule.Priority; 
       State = $Rule.State; 
@@ -2892,13 +2882,13 @@ function Get-TransportRuleInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, Priority, State, Mode, Comments `
     -Headers 'Name', 'Priority', 'State', 'Mode', 'Comments' `
     -AutoFit $wdAutoFitFixed
@@ -2922,7 +2912,7 @@ function Get-TransportRuleInformation {
 
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Transport Rule Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Transport Rule Details'
 
       foreach ($Rule in $TransportRules) {
 
@@ -2959,11 +2949,11 @@ function Get-EmailAddressPolicyInformation {
 
   $ObjectCount = ($EmailAddressPolicies | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Policy in $EmailAddressPolicies) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Policy.Name; 
       Priority = $Policy.Priority; 
       RecipientFilter = $Policy.RecipientFilter; 
@@ -2980,13 +2970,13 @@ function Get-EmailAddressPolicyInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, Priority, RecipientFilter, RecipientFilterApplied `
     -Headers 'Name', 'Priority', 'Recipient Filter', 'Recipient Filter Applied' `
     -AutoFit $wdAutoFitFixed
@@ -3008,7 +2998,7 @@ function Get-EmailAddressPolicyInformation {
     
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Email Address Policy Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Email Address Policy Details'
 
       foreach ($Policy in $EmailAddressPolicies) {
 
@@ -3044,11 +3034,11 @@ function Get-ReceiveConnectorInformation {
 
   $ObjectCount = ($ReceiveConnectors | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Connector in $ReceiveConnectors) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Server = $Connector.Server; 
       Name = $Connector.Name; 
       Bindings = ($Connector.Bindings -join ', '); 
@@ -3065,13 +3055,13 @@ function Get-ReceiveConnectorInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Server, Name, Bindings, Enabled `
     -Headers 'Server', 'Name', 'Bindings', 'Enabled' `
     -AutoFit $wdAutoFitFixed
@@ -3093,7 +3083,7 @@ function Get-ReceiveConnectorInformation {
 
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Receive Connector Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Receive Connector Details'
 
       foreach ($Connector in $ReceiveConnectors) {
 
@@ -3129,11 +3119,11 @@ function Get-SendConnectorInformation {
 
   $ObjectCount = ($SendConnectors | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Connector in $SendConnectors) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Connector.Name; 
       AddressSpaces = ($Connector.AddressSpaces -join ', '); 
       SourceTransportServers = ($Connector.SourceTransportServers -join ', ');
@@ -3150,13 +3140,13 @@ function Get-SendConnectorInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, AddressSpaces, SourceTransportServers, Enabled `
     -Headers 'Name', 'Address Spaces', 'Source Transport Servers', 'Enabled' `
     -AutoFit $wdAutoFitFixed
@@ -3178,7 +3168,7 @@ function Get-SendConnectorInformation {
 
     if($IncludeDetails) { 
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'Send Connector Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'Send Connector Details'
 
       foreach ($Connector in $SendConnectors) {
 
@@ -3245,20 +3235,20 @@ function Get-PublicFolderInformation {
     
     if($RootPublicFolderCount -gt 0) { 
 
-      Write-WordLine -Style 3 -Tabs 0 -Name 'Root Public Folders'
+      Write-WordLine -Style 2 -Tabs 0 -Name 'Root Public Folders'
 
-      [Collections.Hashtable[]]$WordTableRowHash = @()
+      [Collections.Hashtable[]]$HashTable = @()
 
       foreach($PublicFolder in $RootPublicFolders) {
 
-        $WordTableRowHash += @{
+        $HashTable += @{
           Name = $PublicFolder.Name;
           HasSubFolders = $PublicFolder.HasSubFolders;
           ContentMailboxName = $PublicFolder.ContentMailboxName;
         }
       }
 
-      $Table = Add-WordTable -Hashtable $WordTableRowHash `
+      $Table = Add-WordTable -Hashtable $HashTable `
       -Columns Name, HasSubFolders, ContentMailboxName `
       -Headers 'Name', 'Has SubFolders', 'Content MailboxName' `
       -AutoFit $wdAutoFitFixed
@@ -3283,20 +3273,20 @@ function Get-PublicFolderInformation {
 
     if($MailPublicFolderCount -gt 0) {
 
-      Write-WordLine -Style 3 -Tabs 0 -Name 'Mail Public Folders'
+      Write-WordLine -Style 2 -Tabs 0 -Name 'Mail Public Folders'
 
-      [Collections.Hashtable[]]$WordTableRowHash = @()
+      [Collections.Hashtable[]]$HashTable = @()
 
       foreach($PublicFolder in $MailPublicFolders) {
 
-        $WordTableRowHash += @{
+        $HashTable += @{
           DisplayName = $PublicFolder.DisplayName;
           PrimarySmtpAddress = $PublicFolder.PrimarySmtpAddress;
           EmailAddresses = $PublicFolder.EmailAddresses -join ', ';
         }
       }
 
-      $Table = Add-WordTable -Hashtable $WordTableRowHash `
+      $Table = Add-WordTable -Hashtable $HashTable `
       -Columns DisplayName, PrimarySmtpAddress, EmailAddresses `
       -Headers 'Display Name', 'Primary SmtpAddress', 'Email Addresses' `
       -AutoFit $wdAutoFitFixed
@@ -3339,11 +3329,11 @@ function Get-PublicFolderMailboxInformation {
 
   $ObjectCount = ($PublicFolderMailboxes | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Mailbox in $PublicFolderMailboxes) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Mailbox.Name; 
       IsRootPublicFolderMailbox = $Mailbox.IsRootPublicFolderMailbox;
       IsExcludedFromServingHierarchy = $Mailbox.IsExcludedFromServingHierarchy;
@@ -3366,13 +3356,13 @@ function Get-PublicFolderMailboxInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, IsRootPublicFolderMailbox, IsExcludedFromServingHierarchy, Database `
     -Headers 'Name', 'Primary Hierarchy', 'Excluded From Serving Hierarchy', 'Database' `
     -AutoFit $wdAutoFitFixed
@@ -3402,11 +3392,11 @@ function Get-UMDialPlanInformation {
 
   $ObjectCount = ($DialPlans | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($DialPlan in $DialPlans) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $DialPlan.Name; 
       AddressSpaces = ($DialPlan.AddressSpaces -join ', '); 
       SourceTransportServers = ($DialPlan.SourceTransportServers -join ', ');
@@ -3430,7 +3420,7 @@ function Get-UMDialPlanInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
@@ -3440,7 +3430,7 @@ function Get-UMDialPlanInformation {
 
       <#
     
-          $Table = Add-WordTable -Hashtable $WordTableRowHash `
+          $Table = Add-WordTable -Hashtable $HashTable `
           -Columns Name, AddressSpaces, SourceTransportServers, Enabled `
           -Headers 'Name', 'Address Spaces', 'Source Transport Servers', 'Enabled' `
           -AutoFit $wdAutoFitFixed
@@ -3472,11 +3462,11 @@ function Get-DiskSpace {
     
   $wmiObject = Get-WmiObject -Class Win32_Volume -ComputerName $ServerName | Select-Object Name, Capacity, FreeSpace, BootVolume, SystemVolume, FileSystem | Sort-Object -Property Name 
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach($Drive in $wmiObject) {
 
-    $WordTableRowHash += @{
+    $HashTable += @{
       Name =$Drive.Name;
       Capacity = [decimal]::round($Drive.Capacity/1GB);
       FreeDiskSpace = [decimal]::round($Drive.FreeSpace/1GB);
@@ -3488,11 +3478,11 @@ function Get-DiskSpace {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 5 -Tabs 0 -Name 'Disk Volumes'
+    Write-WordLine -Style 4 -Tabs 0 -Name 'Disk Volumes'
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, Capacity, FreeDiskSpace, BootVolume, SystemVolume,FileSystem `
     -Headers 'Name', 'Capacity (GB)', 'Free (GB)', 'Boot Volume', 'System Volume', 'File System' `
     -AutoFit $wdAutoFitFixed
@@ -3507,12 +3497,7 @@ function Get-DiskSpace {
     $Table.Columns.Item(6).Width = 60
 
     # set font to 8pt
-    Set-WordCellFormat -Collection $Table.Columns.Item(1).Cells -Size $WordSmallFontSize
-    Set-WordCellFormat -Collection $Table.Columns.Item(2).Cells -Size $WordSmallFontSize
-    Set-WordCellFormat -Collection $Table.Columns.Item(3).Cells -Size $WordSmallFontSize
-    Set-WordCellFormat -Collection $Table.Columns.Item(4).Cells -Size $WordSmallFontSize
-    Set-WordCellFormat -Collection $Table.Columns.Item(5).Cells -Size $WordSmallFontSize
-    Set-WordCellFormat -Collection $Table.Columns.Item(6).Cells -Size $WordSmallFontSize
+    1..6 | %{ Set-WordCellFormat -Collection $Table.Columns.Item($_).Cells -Size $WordSmallFontSize }
 
     $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
 
@@ -3638,11 +3623,11 @@ function Get-ExchangeServerInformation {
 
   $ObjectCount = ($ExchangeServers | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach ($Server in $ExchangeServers) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Server.Name; 
       ServerRole = $Server.ServerRole; 
       Edition = $Server.Edition;
@@ -3660,13 +3645,13 @@ function Get-ExchangeServerInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, ServerRole, Edition `
     -Headers 'Name', 'Server Role', 'Edition' `
     -AutoFit $wdAutoFitFixed
@@ -3688,7 +3673,7 @@ function Get-ExchangeServerInformation {
     # process each server
     foreach($Server in $ExchangeServers) {
 
-      Write-WordLine -Style 4 -Tabs 0 -Name $Server.Name
+      Write-WordLine -Style 3 -Tabs 0 -Name $Server.Name
 
       if($Server.ServerRole -contains 'Edge') {
         Get-ServerDetails -ExchangeServer $Server -IsEdgeServer
@@ -3712,13 +3697,13 @@ function Get-DatabaseInformation {
 
   $ObjectCount = ($Databases | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
   
   $CultureInfo = ([System.Globalization.CultureInfo]::GetCultureInfo(1031))
 
   foreach ($Database in $Databases) {
   
-    $WordTableRowHash += @{ 
+    $HashTable += @{ 
       Name = $Database.Name;
       ActiveServer = $Database.Server.Name;
       Mounted = $Database.Mounted;
@@ -3737,13 +3722,13 @@ function Get-DatabaseInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
     
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, ActiveServer, Mounted, Size, Copies `
     -Headers 'Name', 'Active Server', 'Mounted', 'Size (GB)', 'Database Copies' `
     -AutoFit $wdAutoFitFixed
@@ -3773,10 +3758,10 @@ function Get-DatabaseAvailabilityGroupInformation {
   $DAGs= Get-DatabaseAvailabilityGroup -Status | Sort-Object Name
   $ObjectCount = ($DAGs | Measure-Object).Count
 
-  [Collections.Hashtable[]]$WordTableRowHash = @()
+  [Collections.Hashtable[]]$HashTable = @()
 
   foreach($DAG in $DAGs) {
-     $WordTableRowHash += @{ 
+     $HashTable += @{ 
       Name = $DAG.Name;
       Servers = (($DAG.Servers | Select Name | Sort-Object -Property Name).Name) -join ', ';
     }
@@ -3789,13 +3774,13 @@ function Get-DatabaseAvailabilityGroupInformation {
   $Text = ('The Exchange Organization contains {0} database availability {1}.' -f $ObjectCount, $ObjectText)
 
   if($ExportTo -eq 'MSWord') {
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 
     Write-EmptyWordLine
 
-    $Table = Add-WordTable -Hashtable $WordTableRowHash `
+    $Table = Add-WordTable -Hashtable $HashTable `
     -Columns Name, Servers `
     -Headers 'Name', 'Member Servers' `
     -AutoFit $wdAutoFitFixed
@@ -3815,7 +3800,7 @@ function Get-DatabaseAvailabilityGroupInformation {
 
     if($IncludeDetails) {
 
-      Write-WordLine -Style 4 -Tabs 0 -Name 'DAG Details'
+      Write-WordLine -Style 3 -Tabs 0 -Name 'DAG Details'
 
       foreach ($DAG in $DAGs) {
 
@@ -3841,6 +3826,84 @@ function Get-DatabaseAvailabilityGroupInformation {
       }
     }
   }
+}
+
+function Get-VirtualDirectoryInformation {
+  param(
+    [string]$Source,
+    [string]$Sort,
+    [string]$Title,
+    [string]$Command
+  )
+
+  Show-ProgressBar -Status 'Servers - Virtual Directory (AutoDiscover)' -PercentComplete 15 -Stage 1
+ 
+  $expr = ('Get-{0} | Sort-Object {1}' -f $Source, $Sort)
+
+  $VirtualDirectories = Invoke-Expression $expr
+  $ObjectCount = ($VirtualDirectories| Measure-Object).Count
+
+  [Collections.Hashtable[]]$HashTable = @()
+
+  foreach ($Dir in $VirtualDirectories) {
+      $HashTable += @{ 
+      Name = $Dir.Name;
+      Server = $Dir.Server;
+      InternalUrl = $Dir.InternalUrl;
+      ExternalUrl = $DIr.ExternalUrl;
+    }
+  }
+
+  if($ExportTo -eq 'MSWord') {
+    
+    Write-WordLine -Style 3 -Tabs 0 -Name $Title
+
+    Write-EmptyWordLine
+
+    $Table = Add-WordTable -Hashtable $HashTable `
+    -Columns Name, Server, InternalUrl, ExternalUrl `
+    -Headers 'Name', 'Server', 'Internal Url', 'External Url' `
+    -AutoFit $wdAutoFitFixed
+
+    Set-WordCellFormat -Collection $Table.Rows.Item(1).Cells -Bold -BackgroundColor $wdColorGray15
+
+    $Table.Columns.Item(1).Width = 100
+    $Table.Columns.Item(2).Width = 80
+    $Table.Columns.Item(3).Width = 150
+    $Table.Columns.Item(4).Width = 150
+    
+    1..4 | %{ Set-WordCellFormat -Collection $Table.Columns.Item($_).Cells -Size $WordSmallFontSize}
+
+    $Table.Rows.SetLeftIndent($Indent0TabStops,$wdAdjustNone)
+
+    Select-WordEndOfDocument
+
+    $Table = $Null
+
+    Write-EmptyWordLine
+  }
+}
+
+function Get-ExchangeVirtualDirectories {
+
+  $SectionTitle = 'Virtual Directories'
+  Write-WordLine -Style 2 -Tabs 0 -Name $SectionTitle
+  Write-EmptyWordLine
+
+  $infoSources = [ordered]@{
+    'AutodiscoverVirtualDirectory' = @{Sort = 'Server';Title = 'AutoDiscover Virtual Directory';Command = '';}
+    'OwaVirtualDirectory' = @{Sort = 'Server';Title = 'OWA Virtual Directory';Command = '';}
+    'EcpVirtualDirectory' = @{Sort = 'Server';Title = 'ECP Virtual Directory';Command = '';}
+    'MapiVirtualDirectory' = @{Sort = 'Server';Title = 'MAPI Virtual Directory';Command = '?{$_.AdminDisplayVersion -ilike ''*15''}';}
+    'WebServicesVirtualDirectory' = @{Sort = 'Server';Title = 'ECP Virtual Directory';Command = '';}
+    'OabVirtualDirectory' = @{Sort = 'Server';Title = 'ECP Virtual Directory';Command = '';}
+    'PowerShellVirtualDirectory' = @{Sort = 'Server';Title = 'ECP Virtual Directory';Command = '';}
+  }
+
+  $infoSources.GetEnumerator() | ForEach-Object { 
+    Get-VirtualDirectoryInformation -Source $_.Key -Sort $infoSources[$_.Key].Sort -Title $infoSources[$_.Key].Title -Command infoSources[$_.Key].Command
+  } 
+
 }
 
 function Output-IntroductionText {
@@ -4188,9 +4251,9 @@ switch ($ExportTo) {
     Get-DatabaseInformation
 
     Get-DatabaseAvailabilityGroupInformation
-    
-    ## DAGs
-    ## Virtual Dirs
+
+    Get-ExchangeVirtualDirectories
+
     ## Certificates
 
     # Global Overrides
