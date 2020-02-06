@@ -8,7 +8,7 @@
   THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE  
   RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER. 
 
-  Version 0.9, 2019-01-20
+  Version 0.91, 2020-02-06
 
   Please use the GitHub repository for comments and issues.
 
@@ -50,7 +50,8 @@
     
   Revision History 
   -------------------------------------------------------------------------------- 
-  0.9 | Initial community pre-release 
+  0.9  | Initial community pre-release 
+  0.91 | Information about processor cores, memory, and page file size added
 
   .PARAMETER CompanyName
   The company name to use on the cover page.
@@ -218,6 +219,10 @@ try {
       public string TimeZone;
       public bool PendingReboot;
       public System.Array TLSSettings;
+      public int ProcessorCores;
+      public double MemorySizeInBytes;
+      public double MemorySizeInGB;
+      public double PageFileSizeInMB;
     }
 
     public class ExchangeCertificateObject {
@@ -2104,7 +2109,7 @@ function Get-AdminPermissionInformation {
 
   foreach($RoleGroup in $RoleGroups) {
     
-    $RoleGroupMembers = Get-RoleGroup $RoleGroup.Name | Get-RoleGroupMember
+    $RoleGroupMembers = Get-RoleGroup -Identity $RoleGroup.Name | Get-RoleGroupMember
 
     if($RoleGroupMembers.Count -ne 0) { 
 
@@ -3419,12 +3424,12 @@ function Get-PublicFolderInformation {
     # This code will run forvever so it's not enabled by default
     # Get-PublicFolderStatistics -ResultSize Unlimited | Select-Object Name,DatabaseName,TotalItemSize | Measure-Object -Property TotalItemSize -Sum
 
-    $PublicFolderCount = ((Get-PublicFolder '\' -Recurse -ResultSize Unlimited) | Measure-Object).Count
+    $PublicFolderCount = ((Get-PublicFolder -Idenity '\' -Recurse -ResultSize Unlimited) | Measure-Object).Count
 
     $MailPublicFolders = Get-MailPublicFolder -ResultSize Unlimited
     $MailPublicFolderCount = ($MailPublicFolders | Measure-Object).Count
 
-    $RootPublicFolders = Get-PublicFolder '\' -GetChildren
+    $RootPublicFolders = Get-PublicFolder -Identity '\' -GetChildren
     $RootPublicFolderCount = ($RootPublicFolders | Measure-Object).Count
 
     [Collections.Hashtable[]]$PublicFolderInformation = @()
@@ -3674,6 +3679,36 @@ function Get-UMDialPlanInformation {
   }
 }
 
+function Get-ServerCoreObject {
+  [CmdletBinding()]
+  param(
+    [string]$ServerName
+  )
+
+  $object = New-Object -TypeName pscustomobject 
+  $object | Add-Member -MemberType NoteProperty -Name Error -Value $false
+  $object | Add-Member -MemberType NoteProperty -Name ComputerName -Value $ServerName
+  $object | Add-Member -MemberType NoteProperty -Name NumberOfCores -Value ([int]::empty)
+
+  # try ctahcing processo information from remote computer
+  try {
+        $wmi_obj_processor = Get-WmiObject -Class Win32_Processor -ComputerName $ServerName
+
+        foreach($processor in $wmi_obj_processor) {
+            $object.NumberOfCores +=$processor.NumberOfCores
+        }
+        
+        Write-Verbose -Message ('Server {0} | Cores: {1}' -f $ServerName, $object.NumberOfCores)
+  }
+  catch {
+      $catchedError = $Error[0]
+      Write-Warning -Message ('Unable to get processor information from server {0} | Reason: {1}' -f $ServerName, $catchedError.ToString()) -InformationAction
+  }
+
+
+
+}
+
 function Get-DiskSpace {
   [CmdletBinding()]
   param(
@@ -3784,6 +3819,36 @@ function Get-OperatingSystemInformation {
     $OperatingSystem.TimeZone = Invoke-Command -ComputerName $ServerName -ScriptBlock {([System.TimeZoneInfo]::Local).StandardName}
   }
 
+  # fetch memory information
+  $WmiMemory = Get-WmiObject -ComputerName $ServerName -Class Win32_PhysicalMemory 
+  
+  $OperatingSystem.MemorySizeInBytes = ($WmiMemory | Measure-Object -Property Capacity -Sum).Sum
+  $OperatingSystem.MemorySizeInGB = ($OperatingSystem.MemorySizeInBytes / 1GB)
+
+  # fetch page file information
+  $WmiPageFile = Get-WmiObject -ComputerName $ServerName -Class Win32_PageFileSetting
+
+  if($WmiPageFile -ne $null) {
+    $OperatingSystem.PageFileSizeInMB = $WmiPageFile.MaximumSize
+
+    Write-Verbose -Message ('Server {0} | PageFileSize {1} MB' -f $ServerName, $OperatingSystem.PageFileSizeInMB)
+  }
+
+  # fetch processor information
+  $WmiProcessor = Get-WmiObject -ComputerName $ServerName -Class Win32_Processor 
+
+  if($WmiProcessor -ne $null) {
+
+    # pre-set
+    $OperatingSystem.ProcessorCores = 0
+
+    foreach($Processor in $WmiProcessor) {
+      $OperatingSystem.ProcessorCores += $Processor.NumberOfCores
+    }
+
+    Write-Verbose -Message ('Server {0} | Cores {1}' -f $ServerName, $OperatingSystem.ProcessorCores)
+  }
+
   return $OperatingSystem
 }
 
@@ -3798,6 +3863,9 @@ function Write-ServerDetails {
   $ObjectInformation += @{ Data = 'Operating Version'; Value = $ServerObject.OperatingSystem.OSVersionBuild; }
   $ObjectInformation += @{ Data = 'Up Time'; Value = ('{0} day(s), {1} hour(s), {2} minute(s), {3} second(s)' -f $ServerObject.OperatingSystem.BootUpTimeInDays,$ServerObject.OperatingSystem.BootUpTimeInHours, $ServerObject.OperatingSystem.BootUpTimeInMinutes, $ServerObject.OperatingSystem.BootUpTimeInSeconds ) }
   $ObjectInformation += @{ Data = 'Time Zone'; Value = $ServerObject.OperatingSystem.TimeZone; }
+  $ObjectInformation += @{ Data = 'Processor Cores'; Value = $ServerObject.OperatingSystem.ProcessorCores; }
+  $ObjectInformation += @{ Data = 'Memory [GB]'; Value = $ServerObject.OperatingSystem.MemorySizeInGB; }
+  $ObjectInformation += @{ Data = 'PageFile [MB]'; Value = ('{0:N0}' -f $ServerObject.OperatingSystem.PageFileSizeInMB); }
 
   if($ExportTo -eq 'MSWord') { 
 
@@ -3865,7 +3933,8 @@ function Get-ServerMonitoringOverrideInformation {
 
   if($ExportTo -eq 'MSWord') {
 
-    Write-WordLine -Style 3 -Tabs 0 -Name $SectionTitle
+    # Style 4 to align with server detail indent
+    Write-WordLine -Style 4 -Tabs 0 -Name $SectionTitle
 
     Write-WordLine -Style 0 -Tabs 0 -Name $Text
 

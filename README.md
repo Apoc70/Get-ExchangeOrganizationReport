@@ -33,6 +33,7 @@ The script queries hardware information from the Exchange server systems and req
 ## Revision History
 
 - v0.9 Initial community pre-release
+- v0.91 Information about processor cores, memory, and page file size added
 
 ## Parameters
 
