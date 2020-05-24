@@ -157,22 +157,18 @@ Creates a Microsoft Word report for the local Exchange Organization with a verbo
 THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE
 RISK OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER.
 
-## TechNet Gallery
-
-Download and vote at TechNet Gallery
-
-- [https://gallery.technet.microsoft.com/Gather-Exchange-Organizatio-8c0dd625](https://gallery.technet.microsoft.com/Gather-Exchange-Organizatio-8c0dd625)
-
 ## Credits
 
 Written by: Thomas Stensitzki
 
-Stay connected:
+## Stay connected
 
 - My Blog: [http://justcantgetenough.granikos.eu](http://justcantgetenough.granikos.eu)
 - Twitter: [https://twitter.com/stensitzki](https://twitter.com/stensitzki)
 - LinkedIn: [http://de.linkedin.com/in/thomasstensitzki](http://de.linkedin.com/in/thomasstensitzki)
 - Github: [https://github.com/Apoc70](https://github.com/Apoc70)
+- MVP Blog: [https://blogs.msmvps.com/thomastechtalk/](https://blogs.msmvps.com/thomastechtalk/)
+- Tech Talk YouTube Channel (DE): [http://techtalk.granikos.eu](http://techtalk.granikos.eu)
 
 For more Office 365, Cloud Security, and Exchange Server stuff checkout services provided by Granikos
 
@@ -180,6 +176,6 @@ For more Office 365, Cloud Security, and Exchange Server stuff checkout services
 - Website: [https://www.granikos.eu/en/](https://www.granikos.eu/en/)
 - Twitter: [https://twitter.com/granikos_de](https://twitter.com/granikos_de)
 
-Additional Credits:
+## Additional Credits
 
 - The script is based on the ADDS_Inventory.ps1 PowerScript by Carl Webster [https://github.com/CarlWebster/ActiveDirectory](https://github.com/CarlWebster/ActiveDirectory)
