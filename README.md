@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://twitter.com/stensitzki"><img src="https://img.shields.io/twitter/follow/stensitzki.svg?label=Twitter%20%40Stensitzki&style=social"></a>
-  <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/thomasstensitzki.svg?logo=LinkedIn"></a>
+  <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/LinkedIn-thomasstensitzki-0077B5.svg?logo=LinkedIn"></a>
 </p>
 
 # Get-ExchangeOrganizationReport.ps1
