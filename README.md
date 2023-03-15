@@ -1,3 +1,8 @@
+<p align="center">
+  <a href="https://twitter.com/stensitzki"><img src="https://img.shields.io/twitter/follow/stensitzki.svg?label=Twitter%20%40Stensitzki&style=social"></a>
+  <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/thomasstensitzki.svg?logo=LinkedIn"></a>
+</p>
+
 # Get-ExchangeOrganizationReport.ps1
 
 This script fetches Exchange organization configuration data and exports it as Word document.
@@ -128,7 +133,7 @@ Currently not implemented.
 
 ### MailFrom
 
-Email address of the report sender. 
+Email address of the report sender.
 
 ### MailTo
 
@@ -146,11 +151,11 @@ Fully qualified domain name (FQDN) of the mail server for sending the report ema
 
 Creates a Word report for the local Exchange Organization using the default values defined on the parameters section of the PowerShell script.
 
-``` PowerShell 
+``` PowerShell
 .\Get-ExchangeOrganizationReport.ps1 -Verbose
 ```
 
-Creates a Microsoft Word report for the local Exchange Organization with a verbose output to the current PowerShell session. 
+Creates a Microsoft Word report for the local Exchange Organization with a verbose output to the current PowerShell session.
 
 ## Note
 
