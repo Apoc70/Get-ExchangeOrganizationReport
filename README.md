@@ -1,7 +1,14 @@
 <p align="center">
+  <a href="https://www.powershellgallery.com/packages/PSWriteOffice"><img src="https://img.shields.io/powershellgallery/p/PSWriteOffice.svg?style=flat-square"></a>
+  <a href="https://github.com/EvotecIT/PSWriteOffice"><img src="https://img.shields.io/github/languages/top/evotecit/PSWriteOffice.svg?style=flat-square"></a>
+  <a href="https://github.com/EvotecIT/PSWriteOffice"><img src="https://img.shields.io/github/languages/code-size/evotecit/PSWriteOffice.svg?style=flat-square"></a>
+  <a href="https://www.powershellgallery.com/packages/PSWriteOffice"><img src="https://img.shields.io/powershellgallery/dt/PSWriteOffice.svg?style=flat-square"></a>
+</p>
+<p align="center">
   <a href="https://twitter.com/stensitzki"><img src="https://img.shields.io/twitter/follow/stensitzki.svg?label=Twitter%20%40Stensitzki&style=social"></a>
   <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/LinkedIn-thomasstensitzki-0077B5.svg?logo=LinkedIn"></a>
-  <a href="https://blog.granikos.eu"><img src="https://img.shields.io/badge/granikos.eu-2A6496.svg"></a>
+  <a href="https://blog.granikos.eu"><img src="https://img.shields.io/badge/blog.granikos.eu-2A6496.svg"></a>
+  <a href="https://www.youtube.com/@ThomasStensitzki"><img src="https://img.shields.io//youtube/channel/views/:UCSBan4tT2BVqi1MSLPwOThA"></a>
 </p>
 
 # Get-ExchangeOrganizationReport.ps1
