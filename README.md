@@ -1,16 +1,9 @@
-
-<p align="center">
-  <a href="https://twitter.com/stensitzki"><img src="https://img.shields.io/twitter/follow/stensitzki.svg?label=Twitter%20%40Stensitzki&style=social"></a>
-  <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/LinkedIn-thomasstensitzki-0077B5.svg?logo=LinkedIn"></a>
-  <a href="https://blog.granikos.eu"><img src="https://img.shields.io/badge/blog.granikos.eu-2A6496.svg"></a>
-</p>
-<p align="center">
-<a href="https://www.youtube.com/@ThomasStensitzki"><img src="https://img.shields.io/badge/YouTube-FF0000?style=?style=plastic&logo=youtube&logoColor=white"></a>
-<a href="https://open.spotify.com/show/2N49k8CLs0VkkQeGObIlPQ?si=2b6f6c229a9c4f1a"><img src="https://img.shields.io/badge/Spotify-1ED760?&style=?style=plastic&logo=spotify&logoColor=white"></a>
-<a href="https://podcasts.apple.com/de/podcast/thomas-tech-community-talk/id1626312145"><img src="https://img.shields.io/badge/apple%20music-F34E68?style=?style=plastic&logo=apple%20music&logoColor=whit"></a>
-</p>
-
 # Get-ExchangeOrganizationReport.ps1
+
+## GitHub
+
+[![license](https://img.shields.io/github/license/Apoc70/Get-ExchangeOrganizationReport.svg)](#)
+[![license](https://img.shields.io/github/release/Apoc70/Get-ExchangeOrganizationReport.svg)](#)
 
 This script fetches Exchange organization configuration data and exports it as Word document.
 
@@ -175,18 +168,15 @@ Written by: Thomas Stensitzki
 
 ## Stay connected
 
-- My Blog: [http://justcantgetenough.granikos.eu](http://justcantgetenough.granikos.eu)
-- Twitter: [https://twitter.com/stensitzki](https://twitter.com/stensitzki)
-- LinkedIn: [http://de.linkedin.com/in/thomasstensitzki](http://de.linkedin.com/in/thomasstensitzki)
-- Github: [https://github.com/Apoc70](https://github.com/Apoc70)
-- MVP Blog: [https://blogs.msmvps.com/thomastechtalk/](https://blogs.msmvps.com/thomastechtalk/)
-- Tech Talk YouTube Channel (DE): [http://techtalk.granikos.eu](http://techtalk.granikos.eu)
+[![twitter](https://img.shields.io/twitter/follow/stensitzki.svg?label=Twitter%20%40Stensitzki&style=social)](https://twitter.com/stensitzki)
+[![linked](https://img.shields.io/badge/LinkedIn-thomasstensitzki-0077B5.svg?logo=LinkedIn)](https://www.linkedin.com/in/thomasstensitzki)
+[![blog](https://img.shields.io/badge/blog.granikos.eu-2A6496.svg)](https://blog.granikos.eu)
+[![mvpblog](https://img.shields.io/badge/blogs.msmvps.com-2A6496.svg)](https://blogs.msmvps.com/thomastechtalk)
 
-For more Office 365, Cloud Security, and Exchange Server stuff checkout services provided by Granikos
-
-- Blog: [http://blog.granikos.eu](http://blog.granikos.eu)
-- Website: [https://www.granikos.eu/en/](https://www.granikos.eu/en/)
-- Twitter: [https://twitter.com/granikos_de](https://twitter.com/granikos_de)
+# Follow my Tech Talk video channel or podcast
+[![spotify](https://img.shields.io/badge/Spotify-1ED760?&style=?style=plastic&logo=spotify&logoColor=white)](https://open.spotify.com/show/2N49k8CLs0VkkQeGObIlPQ?si=2b6f6c229a9c4f1a)
+[![youtube](https://img.shields.io/badge/YouTube-FF0000?style=?style=plastic&logo=youtube&logoColor=white)](https://www.youtube.com/@ThomasStensitzki)
+[![techtalk](https://img.shields.io/badge/techtalk.granikos.eu-2A6496.svg)](http://techtalk.granikos.eu)
 
 ## Additional Credits
 
