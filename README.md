@@ -4,6 +4,7 @@
   <a href="https://www.linkedin.com/in/thomasstensitzki"><img src="https://img.shields.io/badge/LinkedIn-thomasstensitzki-0077B5.svg?logo=LinkedIn"></a>
   <a href="https://blog.granikos.eu"><img src="https://img.shields.io/badge/blog.granikos.eu-2A6496.svg"></a>
 </p>
+<p><a href="https://www.youtube.com/@ThomasStensitzki"><img src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a></p>
 
 # Get-ExchangeOrganizationReport.ps1
 
