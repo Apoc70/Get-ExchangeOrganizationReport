@@ -173,7 +173,7 @@ Written by: Thomas Stensitzki
 [![blog](https://img.shields.io/badge/blog.granikos.eu-2A6496.svg)](https://blog.granikos.eu)
 [![mvpblog](https://img.shields.io/badge/blogs.msmvps.com-2A6496.svg)](https://blogs.msmvps.com/thomastechtalk)
 
-# Follow my Tech Talk video channel or podcast
+## Follow my Tech Talk video channel or podcast
 [![spotify](https://img.shields.io/badge/Spotify-1ED760?&style=?style=plastic&logo=spotify&logoColor=white)](https://open.spotify.com/show/2N49k8CLs0VkkQeGObIlPQ?si=2b6f6c229a9c4f1a)
 [![youtube](https://img.shields.io/badge/YouTube-FF0000?style=?style=plastic&logo=youtube&logoColor=white)](https://www.youtube.com/@ThomasStensitzki)
 [![techtalk](https://img.shields.io/badge/techtalk.granikos.eu-2A6496.svg)](http://techtalk.granikos.eu)
