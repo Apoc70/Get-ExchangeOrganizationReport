@@ -5,9 +5,9 @@
   <a href="https://blog.granikos.eu"><img src="https://img.shields.io/badge/blog.granikos.eu-2A6496.svg"></a>
 </p>
 <p align="center">
-<a href="https://www.youtube.com/@ThomasStensitzki"><img src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
-<a href="https://open.spotify.com/show/2N49k8CLs0VkkQeGObIlPQ?si=2b6f6c229a9c4f1a"><img src="https://img.shields.io/badge/Spotify-1ED760?&style=for-the-badge&logo=spotify&logoColor=white"></a>
-<a href="https://podcasts.apple.com/de/podcast/thomas-tech-community-talk/id1626312145"><img src="https://img.shields.io/badge/apple%20music-F34E68?style=for-the-badge&logo=apple%20music&logoColor=whit"></a>
+<a href="https://www.youtube.com/@ThomasStensitzki"><img src="https://img.shields.io/badge/YouTube-FF0000?style=?style=plastic&logo=youtube&logoColor=white"></a>
+<a href="https://open.spotify.com/show/2N49k8CLs0VkkQeGObIlPQ?si=2b6f6c229a9c4f1a"><img src="https://img.shields.io/badge/Spotify-1ED760?&style=?style=plastic&logo=spotify&logoColor=white"></a>
+<a href="https://podcasts.apple.com/de/podcast/thomas-tech-community-talk/id1626312145"><img src="https://img.shields.io/badge/apple%20music-F34E68?style=?style=plastic&logo=apple%20music&logoColor=whit"></a>
 </p>
 
 # Get-ExchangeOrganizationReport.ps1
